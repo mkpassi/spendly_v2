@@ -6,6 +6,7 @@ import { TransactionsPage } from './pages/TransactionsPage';
 import { GoalsPage } from './pages/GoalsPage';
 import { SummaryPage } from './pages/SummaryPage';
 import { DataPage } from './pages/DataPage';
+import { ProfilePage } from './pages/ProfilePage';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/goals" element={<GoalsPage />} />
           <Route path="/summary" element={<SummaryPage />} />
           <Route path="/data" element={<DataPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Routes>
       </div>
     </Router>
