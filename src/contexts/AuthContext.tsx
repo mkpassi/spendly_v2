@@ -31,49 +31,80 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const previousUserRef = useRef<User | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
     const getSession = async () => {
-      console.log('🔍 AuthContext: Getting initial session...');
-      const { data } = await supabase.auth.getSession();
-      console.log('📋 AuthContext: Initial session data:', data.session);
-      console.log('👤 AuthContext: Initial user data:', data.session?.user);
-      console.log('🏷️ AuthContext: User metadata:', data.session?.user?.user_metadata);
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      previousUserRef.current = data.session?.user ?? null;
-      setLoading(false);
+      try {
+        console.log('🔍 AuthContext: Getting initial session...');
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('❌ AuthContext: Error getting session:', error);
+          throw error;
+        }
+
+        if (!mounted) return;
+
+        console.log('📋 AuthContext: Initial session data:', data.session);
+        console.log('👤 AuthContext: Initial user data:', data.session?.user);
+        
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+        previousUserRef.current = data.session?.user ?? null;
+      } catch (error) {
+        console.error('❌ AuthContext: Failed to get initial session:', error);
+        if (mounted) {
+          setSession(null);
+          setUser(null);
+          previousUserRef.current = null;
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
     };
 
     getSession();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
+        if (!mounted) return;
+
         console.log('🔄 AuthContext: Auth state changed:', event);
         console.log('📋 AuthContext: Session data:', session);
         console.log('👤 AuthContext: User data:', session?.user);
-        console.log('🏷️ AuthContext: User metadata:', session?.user?.user_metadata);
-        
-        // Check if this is a user metadata update
-        if (event === 'USER_UPDATED' && session?.user) {
-          console.log('🔄 AuthContext: USER_UPDATED event detected');
-          console.log('📝 AuthContext: Updated full_name:', session.user.user_metadata?.full_name);
-          console.log('🖼️ AuthContext: Updated avatar_url:', session.user.user_metadata?.avatar_url);
-        }
         
         const previousUser = previousUserRef.current;
         setSession(session);
         setUser(session?.user ?? null);
         previousUserRef.current = session?.user ?? null;
-        setLoading(false);
         
-        // Redirect to chat page when user signs in
-        if (event === 'SIGNED_IN' && session?.user && !previousUser) {
-          console.log('🚀 AuthContext: Redirecting to chat page');
-          navigate('/chat');
+        // Handle different auth events
+        switch (event) {
+          case 'SIGNED_IN':
+            if (session?.user && !previousUser) {
+              console.log('🚀 AuthContext: User signed in, redirecting to chat');
+              navigate('/chat');
+            }
+            break;
+          case 'SIGNED_OUT':
+            console.log('👋 AuthContext: User signed out');
+            setUserProfile(null);
+            navigate('/');
+            break;
+          case 'TOKEN_REFRESHED':
+            console.log('🔄 AuthContext: Token refreshed');
+            break;
+          case 'USER_UPDATED':
+            console.log('🔄 AuthContext: User updated');
+            break;
         }
       }
     );
 
     return () => {
+      mounted = false;
       authListener?.subscription.unsubscribe();
     };
   }, [navigate]);
@@ -107,8 +138,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (dbProfile && !dbError) {
         console.log('✅ AuthContext: Using database profile data');
-        console.log('🖼️ AuthContext: Database avatar_url value:', dbProfile.avatar_url);
-        console.log('👤 AuthContext: Database full_name value:', dbProfile.full_name);
         profileData = {
           full_name: dbProfile.full_name,
           avatar_url: dbProfile.avatar_url,
@@ -116,19 +145,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       } else {
         console.log('⚠️ AuthContext: Database profile not found, falling back to auth metadata');
-        console.log('🖼️ AuthContext: Auth metadata avatar_url:', user.user_metadata?.avatar_url);
-        console.log('👤 AuthContext: Auth metadata full_name:', user.user_metadata?.full_name);
         profileData = {
           full_name: user.user_metadata?.full_name || null,
           avatar_url: user.user_metadata?.avatar_url || null,
           email: user.email || null
         };
+
+        // Create user profile in database if it doesn't exist
+        if (dbError?.code === 'PGRST116') { // Row not found
+          console.log('📝 AuthContext: Creating user profile in database...');
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: user.id,
+              full_name: user.user_metadata?.full_name || null,
+              avatar_url: user.user_metadata?.avatar_url || null,
+              email: user.email || null
+            });
+
+          if (insertError) {
+            console.error('❌ AuthContext: Failed to create user profile:', insertError);
+          } else {
+            console.log('✅ AuthContext: User profile created in database');
+          }
+        }
       }
 
       console.log('📄 AuthContext: Final profile data:', profileData);
       setUserProfile(profileData);
     } catch (error) {
-      console.log('💥 AuthContext: Error fetching profile:', error);
+      console.error('💥 AuthContext: Error fetching profile:', error);
       // Fallback to auth metadata
       const fallbackProfile = {
         full_name: user.user_metadata?.full_name || null,
@@ -141,9 +187,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    setUserProfile(null);
-    navigate('/');
+    try {
+      console.log('👋 AuthContext: Signing out...');
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      setUserProfile(null);
+      navigate('/');
+    } catch (error) {
+      console.error('❌ AuthContext: Error signing out:', error);
+    }
   }, [navigate]);
 
   // Refresh user profile when user changes
@@ -172,4 +225,4 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};
