@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { BarChart3, Calendar, TrendingUp, Loader2, DollarSign, Target, TrendingDown, AlertCircle, RefreshCw, PieChart, Activity } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { formatCurrency } from '../utils/currencyUtils';
 
 interface MonthlySummaryProps {
   userId?: string;
@@ -23,6 +25,7 @@ interface SummaryData {
 
 export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
   const { user } = useAuth();
+  const { currency } = useCurrency();
   const [summary, setSummary] = useState<string>('');
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -150,11 +153,8 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+  const formatCurrencyWithSymbol = (amount: number) => {
+    return formatCurrency(amount, currency);
   };
 
   const formatMessage = (message: string) => {
@@ -344,7 +344,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                       </div>
                     </div>
                     <p className="text-2xl font-bold text-green-800">
-                      {formatCurrency(summaryData.totalIncome)}
+                      {formatCurrencyWithSymbol(summaryData.totalIncome)}
                     </p>
                     {summaryData.topIncomeCategory && (
                       <p className="text-sm text-green-600 mt-1">
@@ -364,7 +364,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                       </div>
                     </div>
                     <p className="text-2xl font-bold text-red-800">
-                      {formatCurrency(summaryData.totalExpenses)}
+                      {formatCurrencyWithSymbol(summaryData.totalExpenses)}
                     </p>
                     {summaryData.topSpendingCategory && (
                       <p className="text-sm text-red-600 mt-1">
@@ -402,7 +402,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                     <p className={`text-2xl font-bold ${
                       summaryData.netSavings >= 0 ? 'text-blue-800' : 'text-orange-800'
                     }`}>
-                      {summaryData.netSavings >= 0 ? '+' : ''}{formatCurrency(summaryData.netSavings)}
+                      {summaryData.netSavings >= 0 ? '+' : ''}{formatCurrencyWithSymbol(summaryData.netSavings)}
                     </p>
                     <div className="mt-2">
                       <div className="flex items-center justify-between text-xs mb-1">
@@ -439,7 +439,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                   </div>
                   <div className="bg-slate-50 rounded-lg p-4 text-center">
                     <div className="text-2xl font-bold text-slate-800">
-                      {formatCurrency(summaryData.averageTransactionAmount)}
+                      {formatCurrencyWithSymbol(summaryData.averageTransactionAmount)}
                     </div>
                     <div className="text-sm text-slate-600">Avg Transaction</div>
                   </div>
@@ -499,7 +499,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                               </div>
                               <div className="text-right flex-shrink-0">
                                 <div className="text-sm font-semibold text-slate-800">
-                                  {formatCurrency(amount)}
+                                  {formatCurrencyWithSymbol(amount)}
                                 </div>
                                 <div className="text-xs text-slate-500">
                                   {percentage.toFixed(1)}%

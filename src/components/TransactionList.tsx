@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { DollarSign, Edit, Trash2, Filter, UserX, AlertCircle, Plus, Save, X, Calendar, Tag, TrendingUp, TrendingDown, Target } from 'lucide-react';
+import { Edit, Trash2, Filter, UserX, AlertCircle, Plus, Save, X, Calendar, Tag, TrendingUp, TrendingDown, Target } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { formatCurrency } from '../utils/currencyUtils';
 
 interface Transaction {
   id: string;
@@ -26,6 +28,7 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
   refreshTrigger = 0
 }) => {
   const { user, loading: authLoading } = useAuth();
+  const { currency, currencySymbol } = useCurrency();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -217,12 +220,9 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
     }
   }, []);
 
-  const formatCurrency = useCallback((amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(Math.abs(amount));
-  }, []);
+  const formatCurrencyWithSymbol = useCallback((amount: number) => {
+    return formatCurrency(Math.abs(amount), currency);
+  }, [currency]);
 
   const formatDate = useCallback((dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -332,7 +332,7 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
       <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-slate-600" />
+            <span className="text-lg font-semibold text-slate-600">{currencySymbol}</span>
             <h2 className="text-lg font-semibold text-slate-800">Transactions</h2>
           </div>
           <div className="text-sm text-slate-500">
@@ -350,13 +350,13 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
             </div>
             <div className="text-sm text-yellow-700">
               {getTransactionStats.expensesOverBudget && (
-                <div>• Expenses are over budget by {formatCurrency(getTransactionStats.budgetExpenses - getTransactionStats.expectedExpenses)}</div>
+                <div>• Expenses are over budget by {formatCurrencyWithSymbol(getTransactionStats.budgetExpenses - getTransactionStats.expectedExpenses)}</div>
               )}
               {getTransactionStats.savingsUnderBudget && (
-                <div>• Savings are {formatCurrency(getTransactionStats.expectedSavings - getTransactionStats.savings)} short of target</div>
+                <div>• Savings are {formatCurrencyWithSymbol(getTransactionStats.expectedSavings - getTransactionStats.savings)} short of target</div>
               )}
               {getTransactionStats.goalsUnderBudget && (
-                <div>• Goal allocations are {formatCurrency(getTransactionStats.expectedGoals - getTransactionStats.goalAllocations)} short of target</div>
+                <div>• Goal allocations are {formatCurrencyWithSymbol(getTransactionStats.expectedGoals - getTransactionStats.goalAllocations)} short of target</div>
               )}
             </div>
           </div>
@@ -371,7 +371,7 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 <span className="text-xs font-medium text-green-800">Income</span>
               </div>
               <div className="text-lg font-semibold text-green-900">
-                {formatCurrency(getTransactionStats.income)}
+                {formatCurrencyWithSymbol(getTransactionStats.income)}
               </div>
             </div>
             
@@ -388,11 +388,11 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 )}
               </div>
               <div className="text-lg font-semibold text-red-900">
-                {formatCurrency(getTransactionStats.budgetExpenses)}
+                {formatCurrencyWithSymbol(getTransactionStats.budgetExpenses)}
               </div>
               {getTransactionStats.income > 0 && (
                 <div className="text-xs text-red-600 mt-1">
-                  {getTransactionStats.expensesOverBudget ? 'Over' : 'of'} {formatCurrency(getTransactionStats.expectedExpenses)} budgeted
+                  {getTransactionStats.expensesOverBudget ? 'Over' : 'of'} {formatCurrencyWithSymbol(getTransactionStats.expectedExpenses)} budgeted
                 </div>
               )}
             </div>
@@ -403,18 +403,18 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 : 'bg-blue-50 border-blue-200'
             }`}>
               <div className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-600">{currencySymbol}</span>
                 <span className="text-xs font-medium text-blue-800">Savings</span>
                 {getTransactionStats.savingsUnderBudget && (
                   <AlertCircle className="h-3 w-3 text-yellow-600" />
                 )}
               </div>
               <div className="text-lg font-semibold text-blue-900">
-                {formatCurrency(getTransactionStats.savings)}
+                {formatCurrencyWithSymbol(getTransactionStats.savings)}
               </div>
               {getTransactionStats.income > 0 && (
                 <div className="text-xs text-blue-600 mt-1">
-                  {getTransactionStats.savingsUnderBudget ? 'Under' : 'of'} {formatCurrency(getTransactionStats.expectedSavings)} target
+                  {getTransactionStats.savingsUnderBudget ? 'Under' : 'of'} {formatCurrencyWithSymbol(getTransactionStats.expectedSavings)} target
                 </div>
               )}
             </div>
@@ -432,11 +432,11 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 )}
               </div>
               <div className="text-lg font-semibold text-purple-900">
-                {formatCurrency(getTransactionStats.goalAllocations)}
+                {formatCurrencyWithSymbol(getTransactionStats.goalAllocations)}
               </div>
               {getTransactionStats.income > 0 && (
                 <div className="text-xs text-purple-600 mt-1">
-                  {getTransactionStats.goalsUnderBudget ? 'Under' : 'of'} {formatCurrency(getTransactionStats.expectedGoals)} target
+                  {getTransactionStats.goalsUnderBudget ? 'Under' : 'of'} {formatCurrencyWithSymbol(getTransactionStats.expectedGoals)} target
                 </div>
               )}
             </div>
@@ -447,9 +447,9 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 : 'bg-orange-50 border-orange-200'
             }`}>
               <div className="flex items-center gap-2">
-                <DollarSign className={`h-4 w-4 ${
+                <span className={`text-sm font-medium ${
                   getTransactionStats.net >= 0 ? 'text-emerald-600' : 'text-orange-600'
-                }`} />
+                }`}>{currencySymbol}</span>
                 <span className={`text-xs font-medium ${
                   getTransactionStats.net >= 0 ? 'text-emerald-800' : 'text-orange-800'
                 }`}>Net</span>
@@ -457,7 +457,7 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
               <div className={`text-lg font-semibold ${
                 getTransactionStats.net >= 0 ? 'text-emerald-900' : 'text-orange-900'
               }`}>
-                {getTransactionStats.net >= 0 ? '+' : ''}{formatCurrency(getTransactionStats.net)}
+                {getTransactionStats.net >= 0 ? '+' : ''}{formatCurrencyWithSymbol(getTransactionStats.net)}
               </div>
             </div>
           </div>
@@ -535,7 +535,9 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
           </div>
         ) : filteredTransactions.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
-            <DollarSign className="h-12 w-12 mx-auto mb-4 text-slate-300" />
+            <div className="h-12 w-12 mx-auto mb-4 text-slate-300 flex items-center justify-center text-2xl font-bold">
+              {currencySymbol}
+            </div>
             {transactions.length === 0 ? (
               <>
                 <p className="font-semibold">No transactions yet</p>
@@ -556,7 +558,7 @@ const TransactionListComponent: React.FC<TransactionListProps> = ({
                 transaction={transaction}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
-                formatCurrency={formatCurrency}
+                                  formatCurrency={formatCurrencyWithSymbol}
                 formatDate={formatDate}
                 formatTimestamp={formatTimestamp}
               />
