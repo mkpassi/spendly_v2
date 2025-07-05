@@ -1,8 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MessageCircle, Loader2, Trash2, Bot, BarChart3 } from 'lucide-react';
+import { Send, MessageCircle, Loader2, Trash2, Bot, BarChart3, Mic, MicOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrency } from '../contexts/CurrencyContext';
+
+// Type declarations for Web Speech API
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
 
 interface ChatMessage {
   id: string;
@@ -26,9 +42,48 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const hasStartedChat = messages.some(m => m.sender === 'user');
+
+  // Check for speech recognition support
+  useEffect(() => {
+    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+      setSpeechSupported(true);
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      
+      if (recognitionRef.current) {
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = false;
+        recognitionRef.current.lang = 'en-US';
+
+        recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
+          const transcript = event.results[0][0].transcript;
+          setInputMessage(transcript);
+          setIsListening(false);
+        };
+
+        recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+        };
+
+        recognitionRef.current.onend = () => {
+          setIsListening(false);
+        };
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   // Load chat history on mount
   useEffect(() => {
@@ -316,6 +371,23 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const handleVoiceInput = () => {
+    if (!speechSupported || !recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (error) {
+        console.error('Error starting speech recognition:', error);
+        setIsListening(false);
+      }
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden h-full flex flex-col">
       {/* Header */}
@@ -487,12 +559,38 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               onKeyPress={handleKeyPress}
               placeholder={
                 user
-                  ? 'Ask about your finances or add a transaction...'
+                  ? isListening 
+                    ? 'Listening... Speak now!'
+                    : 'Ask about your finances or add a transaction...'
                   : 'Please log in to chat'
               }
-              className="w-full h-12 p-3 pr-14 rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white focus:outline-none transition-all duration-200 resize-none overflow-hidden placeholder:text-slate-400"
+              className={`w-full h-12 p-3 pr-24 rounded-lg border border-slate-200 focus:border-blue-500 focus:outline-none transition-all duration-200 resize-none overflow-hidden placeholder:text-slate-400 ${
+                isListening 
+                  ? 'bg-red-50 border-red-200 focus:bg-red-50' 
+                  : 'bg-slate-50 focus:bg-white'
+              }`}
               rows={1}
             />
+            {/* Voice Input Button */}
+            {speechSupported && user && (
+              <button
+                onClick={handleVoiceInput}
+                disabled={isLoading || !user}
+                className={`absolute right-12 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg transition-all duration-200 flex items-center justify-center ${
+                  isListening
+                    ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
+                    : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                } disabled:bg-slate-300 disabled:cursor-not-allowed`}
+                title={isListening ? 'Stop recording' : 'Start voice input'}
+              >
+                {isListening ? (
+                  <MicOff className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </button>
+            )}
+            {/* Send Button */}
             <button
               onClick={handleSendMessage}
               disabled={!inputMessage.trim() || isLoading || !user}
@@ -505,6 +603,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               )}
             </button>
           </div>
+          {/* Voice Input Status */}
+          {speechSupported && user && isListening && (
+            <div className="mt-2 flex items-center gap-2 text-sm text-red-600">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+              Recording... Click the microphone again to stop
+            </div>
+          )}
+          {/* Browser Support Message */}
+          {!speechSupported && user && (
+            <div className="mt-2 text-xs text-slate-500">
+              💡 Voice input is not supported in your browser. Try Chrome, Safari, or Edge for voice features.
+            </div>
+          )}
         </div>
       </div>
     </div>

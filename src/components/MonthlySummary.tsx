@@ -223,27 +223,106 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
           </div>
         </div>
         
-        {/* Date Range Picker */}
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="h-4 w-4 text-slate-500" />
-            <label className="text-sm font-medium text-slate-700">Date Range:</label>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={dateRange.startDate}
-              onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
-              className="px-3 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <span className="text-slate-500 text-sm">to</span>
-            <input
-              type="date"
-              value={dateRange.endDate}
-              onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
-              className="px-3 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+        {/* Enhanced Date Range Picker */}
+        <div className="mt-4 p-4 bg-white rounded-lg border border-slate-200 shadow-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="p-1 bg-blue-100 rounded">
+                <CalendarDays className="h-4 w-4 text-blue-600" />
+              </div>
+              <label className="text-sm font-medium text-slate-700">Select Date Range:</label>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <label className="text-xs text-slate-500 mb-1">From</label>
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                />
+              </div>
+              <div className="flex items-center mt-5">
+                <span className="text-slate-400 text-sm font-medium">→</span>
+              </div>
+              <div className="flex flex-col">
+                <label className="text-xs text-slate-500 mb-1">To</label>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                />
+              </div>
+            </div>
+                         <div className="flex items-center gap-2 text-xs text-slate-500">
+               <span>📊</span>
+               <span>Analyze your financial data for any period</span>
+             </div>
+           </div>
+           
+           {/* Quick Date Presets */}
+           <div className="mt-3 pt-3 border-t border-slate-100">
+             <div className="flex flex-wrap items-center gap-2">
+               <span className="text-xs font-medium text-slate-600">Quick select:</span>
+               <button
+                 onClick={() => {
+                   const now = new Date();
+                   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                   setDateRange({
+                     startDate: startOfMonth.toISOString().split('T')[0],
+                     endDate: endOfMonth.toISOString().split('T')[0]
+                   });
+                 }}
+                 className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs hover:bg-blue-100 transition-colors"
+               >
+                 This Month
+               </button>
+               <button
+                 onClick={() => {
+                   const now = new Date();
+                   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                   const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                   setDateRange({
+                     startDate: startOfLastMonth.toISOString().split('T')[0],
+                     endDate: endOfLastMonth.toISOString().split('T')[0]
+                   });
+                 }}
+                 className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-xs hover:bg-slate-100 transition-colors"
+               >
+                 Last Month
+               </button>
+               <button
+                 onClick={() => {
+                   const now = new Date();
+                   const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+                   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                   setDateRange({
+                     startDate: threeMonthsAgo.toISOString().split('T')[0],
+                     endDate: endOfMonth.toISOString().split('T')[0]
+                   });
+                 }}
+                 className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs hover:bg-green-100 transition-colors"
+               >
+                 Last 3 Months
+               </button>
+               <button
+                 onClick={() => {
+                   const now = new Date();
+                   const startOfYear = new Date(now.getFullYear(), 0, 1);
+                   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                   setDateRange({
+                     startDate: startOfYear.toISOString().split('T')[0],
+                     endDate: endOfMonth.toISOString().split('T')[0]
+                   });
+                 }}
+                 className="px-2 py-1 bg-purple-50 text-purple-700 rounded text-xs hover:bg-purple-100 transition-colors"
+               >
+                 Year to Date
+               </button>
+             </div>
+           </div>
         </div>
         
         {lastGenerated && (

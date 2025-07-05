@@ -76,7 +76,7 @@ export const LandingPage: React.FC = () => {
     },
     {
       icon: BarChart3,
-      title: 'Monthly Summary',
+                title: 'Expense Summary',
       description: 'Get AI-powered insights and analysis of your spending patterns',
       href: '/summary',
       color: 'bg-amber-500',
