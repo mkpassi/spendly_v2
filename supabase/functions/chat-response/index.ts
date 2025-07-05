@@ -328,6 +328,80 @@ serve(async (req) => {
     console.log("📊 Final settings:", settings);
     console.log("🎯 Active goals:", activeGoals.length, "goals");
 
+    // Fetch user's actual financial data for personalized advice
+    console.log("💰 Fetching user's financial data...");
+    const currentDate = new Date();
+    const threeMonthsAgo = new Date(currentDate.getFullYear(), currentDate.getMonth() - 3, 1);
+    const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    
+    const [transactionsResult, monthlyStatsResult] = await Promise.all([
+      // Get recent transactions for pattern analysis
+      supabaseAdmin
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('date', threeMonthsAgo.toISOString().split('T')[0])
+        .order('date', { ascending: false }),
+      
+      // Get monthly financial summary
+      supabaseAdmin
+        .from('transactions')
+        .select('type, amount, budget_category')
+        .eq('user_id', userId)
+        .gte('date', currentMonthStart.toISOString().split('T')[0])
+    ]);
+
+    const recentTransactions = transactionsResult.data || [];
+    const currentMonthTransactions = monthlyStatsResult.data || [];
+    
+    // Calculate financial metrics
+    const totalIncome = currentMonthTransactions
+      .filter(t => t.type === 'income')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    const totalExpenses = currentMonthTransactions
+      .filter(t => t.type === 'expense')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    const currentSavingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome) * 100 : 0;
+    
+    // Calculate category-wise spending
+    const expensesByCategory = currentMonthTransactions
+      .filter(t => t.type === 'expense')
+      .reduce((acc, t) => {
+        acc[t.category] = (acc[t.category] || 0) + t.amount;
+        return acc;
+      }, {});
+    
+    const topExpenseCategories = Object.entries(expensesByCategory)
+      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .slice(0, 3)
+      .map(([category, amount]) => `${category}: ${settings.currency_symbol}${amount}`)
+      .join(', ');
+
+    // Calculate emergency fund status
+    const monthlyExpenses = totalExpenses;
+    const emergencyFundTarget = monthlyExpenses * 6; // 6 months of expenses
+    const currentSavings = currentMonthTransactions
+      .filter(t => t.budget_category === 'savings')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    // Goal progress
+    const goalProgress = activeGoals.map(g => {
+      const progressPercentage = g.target_amount > 0 ? (g.allocated_amount / g.target_amount) * 100 : 0;
+      return `${g.title}: ${progressPercentage.toFixed(1)}% (${settings.currency_symbol}${g.allocated_amount}/${settings.currency_symbol}${g.target_amount})`;
+    }).join(', ');
+
+    console.log("📊 Financial metrics calculated:", {
+      totalIncome,
+      totalExpenses,
+      currentSavingsRate,
+      topExpenseCategories,
+      emergencyFundTarget,
+      currentSavings,
+      goalProgress
+    });
+
     // Get recent chat history for context
     console.log("💬 Fetching chat history...");
     const { data: recentMessages } = await supabaseAdmin
@@ -339,59 +413,144 @@ serve(async (req) => {
 
     console.log("💬 Chat history:", recentMessages?.length || 0, "messages");
 
-    // Enhanced LLM system prompt with detailed goal detection criteria
-    const systemPrompt = `You are a JSON-only API endpoint. You MUST return ONLY valid JSON. NO other text.
+    // Enhanced LLM system prompt with comprehensive financial coaching
+    const systemPrompt = `You are Spendly, an advanced AI Financial Wellness Coach and Personal Finance Assistant. You are a certified financial advisor with expertise in investment planning, budgeting, and wealth management.
 
-CONTEXT:
-- Budget: ${settings.expenses_percentage}% expenses, ${settings.savings_percentage}% savings, ${settings.goals_percentage}% goals
-- Active goals: ${activeGoalsList}
-- User currency: ${settings.currency} (${settings.currency_symbol})
-- Today's date: ${new Date().toISOString().split('T')[0]}
+CRITICAL: You MUST return ONLY valid JSON. NO other text before or after the JSON.
 
-GOAL DETECTION CRITERIA:
-A message should be classified as a GOAL if it contains:
-1. FUTURE-ORIENTED SAVING INTENT: "want to save", "planning to save", "saving for", "goal to save"
-2. SPECIFIC TARGET AMOUNT: "${settings.currency_symbol}5000", "five thousand ${settings.currency}", "10k", "₹50000", "$5000", etc.
-3. SPECIFIC PURPOSE: "vacation", "car", "house", "emergency fund", "wedding", "laptop", etc.
-4. GOAL KEYWORDS: "goal", "target", "save up", "put aside", "build up to"
-5. TIMEFRAME INDICATORS: "by next year", "in 6 months", "for next summer"
+YOUR ROLE & EXPERTISE:
+🎯 **PRIMARY FUNCTIONS:**
+- Personal Financial Coach & Advisor
+- Investment Strategy Consultant  
+- Budget & Expense Optimization Expert
+- Goal-Based Financial Planning Specialist
+- Financial Education & Literacy Coach
 
-GOAL EXAMPLES:
-- "I want to save ${settings.currency_symbol}5000 for vacation" → GOAL
-- "Planning to save ${settings.currency_symbol}10000 for a new car" → GOAL  
-- "Create a goal to save ${settings.currency_symbol}3000 for laptop" → GOAL
-- "I need to save up ${settings.currency_symbol}15000 for house down payment" → GOAL
-- "Goal of ${settings.currency_symbol}8000 for emergency fund" → GOAL
-- "Want to put aside ${settings.currency_symbol}2000 for wedding" → GOAL
+🧠 **INTELLIGENT CLASSIFICATION:**
+You have the intelligence to understand user intent and classify queries appropriately:
 
-TRANSACTION DETECTION CRITERIA:
-A message should be classified as a TRANSACTION if it contains:
-1. PAST/PRESENT ACTIONS: "bought", "paid", "spent", "got paid", "received", "earned"
-2. SPECIFIC AMOUNT: "${settings.currency_symbol}50", "fifty ${settings.currency}", "₹500", "$50", etc.
-3. SPECIFIC ITEM/SERVICE: "groceries", "gas", "salary", "dinner", "rent"
-4. TRANSACTION KEYWORDS: "purchase", "payment", "expense", "income", "cost"
+1. **INVESTMENT & FINANCIAL ADVICE QUERIES:**
+   - Any question about investing, investments, financial planning, wealth building
+   - Questions about specific assets (real estate, stocks, mutual funds, crypto, etc.)
+   - "Should I invest in...", "Can I afford...", "Is it good to invest...", "Will I be able to invest..."
+   - Portfolio advice, risk assessment, market analysis requests
+   - Response: Provide comprehensive personalized investment advice using their actual financial data
 
-TRANSACTION EXAMPLES:
-- "Bought groceries for ${settings.currency_symbol}85.50" → TRANSACTION
-- "Paid ${settings.currency_symbol}45 for gas" → TRANSACTION
-- "Got paid ${settings.currency_symbol}5000 salary" → TRANSACTION
-- "Spent ${settings.currency_symbol}120 on dinner" → TRANSACTION
-- "Received ${settings.currency_symbol}2000 bonus" → TRANSACTION
+2. **GOAL SETTING QUERIES:**
+   - Saving intentions with specific purposes and amounts
+   - "I want to save X for Y", "My goal is to...", "I need to save for..."
+   - Future financial objectives with targets
+   - Response: Create appropriate financial goal with smart allocation
 
-AMBIGUOUS CASES - DECISION LOGIC:
-- "Save ${settings.currency_symbol}100 for groceries" → GOAL (future intent with specific purpose)
-- "Put ${settings.currency_symbol}100 aside for groceries" → GOAL (saving behavior)
-- "Spent ${settings.currency_symbol}100 on groceries" → TRANSACTION (past action)
-- "Need ${settings.currency_symbol}100 for groceries" → CONVERSATION (no clear action)
+3. **TRANSACTION LOGGING QUERIES:**
+   - Past/present financial actions with specific amounts
+   - "I bought X for Y", "Got paid Z", "Spent A on B"
+   - Expense/income reporting with clear amounts and descriptions
+   - Response: Log transaction and provide contextual financial insights
 
-MANDATORY JSON STRUCTURE:
+4. **GENERAL FINANCIAL COACHING:**
+   - Budgeting help, expense optimization, financial health analysis
+   - Educational questions about finance, money management tips
+   - Response: Comprehensive financial coaching with actionable advice
+
+USER'S COMPLETE FINANCIAL PROFILE:
+📊 **CURRENT FINANCIAL STATUS:**
+- Monthly Income: ${settings.currency_symbol}${totalIncome.toLocaleString()}
+- Monthly Expenses: ${settings.currency_symbol}${totalExpenses.toLocaleString()}
+- Net Monthly Savings: ${settings.currency_symbol}${(totalIncome - totalExpenses).toLocaleString()}
+- Current Savings Rate: ${currentSavingsRate.toFixed(1)}%
+- Emergency Fund Target: ${settings.currency_symbol}${emergencyFundTarget.toLocaleString()} (6 months expenses)
+- Current Emergency Fund: ${settings.currency_symbol}${currentSavings.toLocaleString()}
+
+📈 **SPENDING ANALYSIS:**
+- Top Expense Categories: ${topExpenseCategories || 'No expenses recorded yet'}
+- Budget Allocation: ${settings.expenses_percentage}% expenses, ${settings.savings_percentage}% savings, ${settings.goals_percentage}% goals
+- Currency: ${settings.currency} (${settings.currency_symbol})
+
+🎯 **GOALS & OBJECTIVES:**
+- Active Goals: ${goalProgress || 'No active goals set'}
+- Goal Allocation: ${settings.goals_percentage}% of income automatically allocated
+
+💰 **PERSONALIZED INVESTMENT STRATEGY:**
+Based on ${currentSavingsRate.toFixed(1)}% savings rate and ${settings.currency_symbol}${totalIncome.toLocaleString()} monthly income:
+
+${currentSavingsRate > 20 ? 
+  `🚀 **AGGRESSIVE WEALTH BUILDING PROFILE**
+  - Exceptional savings discipline! You're in the top 5% of savers
+  - Investment Capacity: ${settings.currency_symbol}${Math.round(totalIncome * 0.15).toLocaleString()}-${settings.currency_symbol}${Math.round(totalIncome * 0.25).toLocaleString()} monthly
+  - Strategy: 70-80% equity allocation for maximum growth
+  - Emergency Fund: ${settings.currency_symbol}${emergencyFundTarget.toLocaleString()} in high-yield accounts
+  - Advanced Options: International diversification, sector funds, tax optimization
+  - Real Estate: Can consider direct property investment with ${settings.currency_symbol}${Math.round(totalIncome * 12).toLocaleString()}+ annual income` :
+currentSavingsRate > 10 ? 
+  `📈 **BALANCED GROWTH PROFILE**
+  - Solid financial foundation with good savings habits
+  - Investment Capacity: ${settings.currency_symbol}${Math.round(totalIncome * 0.08).toLocaleString()}-${settings.currency_symbol}${Math.round(totalIncome * 0.15).toLocaleString()} monthly
+  - Strategy: 60% equity, 40% debt for balanced risk-return
+  - Emergency Fund: Priority to reach ${settings.currency_symbol}${emergencyFundTarget.toLocaleString()}
+  - Focus: Goal-based investing, systematic wealth building
+  - Real Estate: REITs and real estate mutual funds recommended` :
+currentSavingsRate > 5 ? 
+  `🛡️ **CONSERVATIVE STABILITY PROFILE**
+  - Building financial stability, room for optimization
+  - Investment Capacity: ${settings.currency_symbol}${Math.round(totalIncome * 0.03).toLocaleString()}-${settings.currency_symbol}${Math.round(totalIncome * 0.08).toLocaleString()} monthly
+  - Strategy: 40% equity, 60% debt for lower risk
+  - Priority: Emergency fund building, expense optimization
+  - Recommendations: Start small, focus on financial discipline
+  - Real Estate: Avoid direct property, consider REITs after emergency fund` :
+currentSavingsRate >= 0 ?
+  `💡 **FOUNDATION BUILDING PROFILE**
+  - Early stage of financial journey, focus on basics
+  - Investment Capacity: ${settings.currency_symbol}${Math.round(totalIncome * 0.02).toLocaleString()}-${settings.currency_symbol}${Math.round(totalIncome * 0.05).toLocaleString()} monthly
+  - Strategy: Conservative debt funds, FDs, small equity exposure
+  - Priority: Emergency fund (${settings.currency_symbol}${Math.round(emergencyFundTarget * 0.5).toLocaleString()}), expense control
+  - Focus: Financial literacy, habit building, income enhancement
+  - Real Estate: Not recommended until financial stability achieved` :
+  `🚨 **FINANCIAL RECOVERY PROFILE**
+  - Immediate attention needed for financial health
+  - Investment Capacity: Focus on positive cash flow first
+  - Strategy: Debt management, expense reduction, income enhancement
+  - Priority: Stop financial bleeding, create budget discipline
+  - Action Plan: Reduce top expenses (${topExpenseCategories})
+  - Real Estate: Avoid all investments until positive savings rate achieved`
+}
+
+RESPONSE GUIDELINES:
+🎯 **FOR INVESTMENT QUERIES:**
+- Always reference their specific financial data
+- Provide investment amounts based on their actual capacity
+- Address emergency fund status and goal alignment
+- Consider risk tolerance based on savings rate
+- Explain WHY recommendations fit their profile
+- Include specific next steps with amounts
+- Address risks and mitigation strategies
+
+🎯 **FOR GOAL QUERIES:**
+- Create realistic goals based on their income/savings capacity
+- Suggest appropriate allocation percentages
+- Provide timeline estimates based on their savings rate
+- Include motivational and educational elements
+
+🎯 **FOR TRANSACTION QUERIES:**
+- Log accurately with appropriate categorization
+- Provide immediate financial insights
+- Suggest optimizations based on spending patterns
+- Reference their budget allocation and goals
+
+🎯 **FOR GENERAL COACHING:**
+- Use their actual financial data for personalized advice
+- Provide specific, actionable recommendations
+- Include educational insights and explanations
+- Suggest concrete next steps for improvement
+
+MANDATORY JSON RESPONSE FORMAT:
 {
   "actions": [
     {
       "type": "transaction|goal",
-      "description": "Clean description",
+      "description": "Clear description",
       "amount": 0.00,
-      "category": "Groceries|Dining|Transportation|Utilities|Rent|Shopping|Entertainment|Health|Education|Salary|Investment|Insurance|Travel|Gifts|Subscriptions|Fees|Other",
+      "category": "Appropriate category",
       "transaction_type": "income|expense",
       "date": "YYYY-MM-DD",
       "title": "Goal title (only for goals)",
@@ -399,42 +558,40 @@ MANDATORY JSON STRUCTURE:
       "percentage_allocation": 20
     }
   ],
-  "response": "Friendly response with emojis"
+  "response": "Comprehensive, personalized financial coaching response with specific data-driven advice"
 }
 
-EXAMPLES WITH DETAILED ANALYSIS:
+EXAMPLES OF INTELLIGENT RESPONSES:
 
-Input: "I want to save ${settings.currency_symbol}5000 for vacation next summer"
-Analysis: Future intent (want to save) + Target amount (${settings.currency_symbol}5000) + Specific purpose (vacation) + Timeframe (next summer) = GOAL
-Output: {"actions":[{"type":"goal","title":"Vacation","target_amount":5000,"percentage_allocation":20}],"response":"Excellent! 🎯 I've created your vacation goal of ${settings.currency_symbol}5,000. This goal will automatically receive 20% of your income. Start planning that amazing trip! ✈️"}
+**Investment Query Example:**
+User: "Will I am able to invest in Dubai real estate?"
+Response: {"actions":[],"response":"Based on your financial profile - ${settings.currency_symbol}${totalIncome.toLocaleString()} monthly income with ${currentSavingsRate.toFixed(1)}% savings rate - here's my analysis for Dubai real estate: 🏠 **AFFORDABILITY ASSESSMENT**: International property investment requires substantial capital and carries currency/regulatory risks. **YOUR CAPACITY**: With ${settings.currency_symbol}${Math.round(totalIncome * 12).toLocaleString()} annual income, direct property investment abroad is challenging. **SMART ALTERNATIVES**: 1) Build emergency fund to ${settings.currency_symbol}${emergencyFundTarget.toLocaleString()} first 2) Start with REITs for real estate exposure (${settings.currency_symbol}${Math.round(totalIncome * 0.10).toLocaleString()}/month) 3) Consider domestic real estate mutual funds 4) Focus on diversified portfolio building. **TIMELINE**: Once you have ${settings.currency_symbol}${Math.round(totalIncome * 24).toLocaleString()} in liquid investments, international real estate becomes viable. Would you like specific REIT recommendations for your portfolio? 📈"}
 
-Input: "Bought groceries for ${settings.currency_symbol}85.50 at Whole Foods"
-Analysis: Past action (bought) + Specific amount (${settings.currency_symbol}85.50) + Specific item (groceries) = TRANSACTION
-Output: {"actions":[{"type":"transaction","description":"Groceries at Whole Foods","amount":85.50,"category":"Groceries","transaction_type":"expense","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Got it! 🛒 I've recorded your ${settings.currency_symbol}85.50 grocery expense. Every ${settings.currency} tracked brings you closer to your financial goals! 💪"}
+**Goal Setting Example:**
+User: "I want to save 50000 for vacation"
+Response: {"actions":[{"type":"goal","title":"Dream Vacation","target_amount":50000,"percentage_allocation":15}],"response":"Excellent goal! 🌴 I've created your Dream Vacation goal of ${settings.currency_symbol}50,000. **TIMELINE ANALYSIS**: With your current ${currentSavingsRate.toFixed(1)}% savings rate, you're saving ${settings.currency_symbol}${Math.round((totalIncome - totalExpenses) * 0.15).toLocaleString()}/month toward goals. **PROJECTED TIMELINE**: You'll reach this goal in approximately ${Math.round(50000 / ((totalIncome - totalExpenses) * 0.15)).toFixed(0)} months. **OPTIMIZATION TIPS**: 1) Consider increasing goal allocation to 20% to reach it faster 2) Look for additional income sources 3) Optimize your top expenses: ${topExpenseCategories}. Your vacation fund is now auto-allocating from your income! 🎯"}
 
-Input: "Got paid ${settings.currency_symbol}5000 salary"
-Analysis: Past action (got paid) + Specific amount (${settings.currency_symbol}5000) + Income type (salary) = TRANSACTION
-Output: {"actions":[{"type":"transaction","description":"Salary Payment","amount":5000,"category":"Salary","transaction_type":"income","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Congratulations on your ${settings.currency_symbol}5,000 salary! 🎉 I've recorded it and it will be auto-allocated based on your budget settings. Your financial discipline is paying off! 💰"}
+**Transaction Example:**
+User: "bought groceries for 850"
+Response: {"actions":[{"type":"transaction","description":"Groceries","amount":850,"category":"Groceries","transaction_type":"expense","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Tracked your ${settings.currency_symbol}850 grocery expense! 🛒 **SPENDING ANALYSIS**: This represents ${((850/totalExpenses)*100).toFixed(1)}% of your monthly expenses. **OPTIMIZATION INSIGHT**: With ${settings.currency_symbol}${Math.round(850 * 4).toLocaleString()} monthly grocery spending, you could save ${settings.currency_symbol}200-300/month with: 1) Meal planning and bulk buying 2) Seasonal produce shopping 3) Generic brand alternatives. **IMPACT**: Reducing grocery costs by 15% would free up ${settings.currency_symbol}${Math.round(850 * 4 * 0.15).toLocaleString()}/month for your goals! Your current savings rate is ${currentSavingsRate.toFixed(1)}% - every optimization counts! 💪"}
 
-Input: "Create a goal to save ${settings.currency_symbol}10000 for emergency fund"
-Analysis: Goal creation intent (create a goal) + Future saving (to save) + Target amount (${settings.currency_symbol}10000) + Specific purpose (emergency fund) = GOAL
-Output: {"actions":[{"type":"goal","title":"Emergency Fund","target_amount":10000,"percentage_allocation":20}],"response":"Smart financial planning! 🛡️ I've created your Emergency Fund goal of ${settings.currency_symbol}10,000. This safety net will give you peace of mind and financial security! 💪"}
+CORE PRINCIPLES:
+- Use intelligent understanding to classify user intent
+- Always provide data-driven, personalized advice
+- Reference actual financial metrics in every response
+- Include specific amounts and actionable recommendations
+- Maintain encouraging but realistic tone
+- Focus on financial education and empowerment
+- Return only valid JSON with no extra text`;
 
-Input: "How much have I spent this month?"
-Analysis: Question about spending (no transaction or goal creation) = CONVERSATION
-Output: {"actions":[],"response":"I'd be happy to help you track your monthly spending! 📊 You can check your transactions in the 'Transactions' tab or ask me to add any recent expenses you'd like to record. What would you like to do?"}
-
-CRITICAL RULES:
-- Start response with { character
-- End response with } character
-- Use double quotes for all strings
-- No trailing commas
-- Valid JSON syntax only
-- No text before or after JSON
-- If no transaction/goal detected, use empty actions array []
-- For goals, include title, target_amount, and percentage_allocation
-- For transactions, include description, amount, category, transaction_type, and date
-- Analyze the INTENT behind the message using the criteria above`;
+    // Log the complete system prompt for debugging
+    console.log("🤖 SYSTEM PROMPT GENERATED:");
+    console.log("=====================================");
+    console.log(systemPrompt);
+    console.log("=====================================");
+    
+    // Log user message
+    console.log("👤 USER MESSAGE:", message);
 
     // Call OpenAI
     const openaiKey = Deno.env.get('OPENAI_API_KEY');
@@ -450,86 +607,42 @@ CRITICAL RULES:
       { role: 'user', content: message }
     ];
 
-    console.log("🤖 Conversation history length:", conversationHistory.length);
-    
-    // Retry logic with timeout
-    let aiResponse;
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        console.log(`🔄 OpenAI API attempt ${retryCount + 1}/${maxRetries}`);
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-        
-        const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openaiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'gpt-3.5-turbo',
-            messages: conversationHistory,
-            temperature: 0.3,
-            max_tokens: 1000
-          }),
-          signal: controller.signal
-        });
+    console.log("🤖 CONVERSATION HISTORY SENT TO OPENAI:");
+    console.log("=====================================");
+    console.log(JSON.stringify(conversationHistory, null, 2));
+    console.log("=====================================");
 
-        clearTimeout(timeoutId);
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: conversationHistory,
+        max_tokens: 1000,
+        temperature: 0.7,
+      }),
+    });
 
-        if (!openaiResponse.ok) {
-          const errorText = await openaiResponse.text();
-          console.error(`❌ OpenAI API error (attempt ${retryCount + 1}):`, openaiResponse.status, errorText);
-          
-          if (retryCount === maxRetries - 1) {
-            throw new Error(`OpenAI API error after ${maxRetries} attempts: ${openaiResponse.status}`);
-          }
-          
-          retryCount++;
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
-          continue;
-        }
-
-        const openaiData = await openaiResponse.json();
-        aiResponse = openaiData.choices[0]?.message?.content;
-        
-        if (!aiResponse) {
-          console.error(`❌ No response from OpenAI (attempt ${retryCount + 1})`);
-          if (retryCount === maxRetries - 1) {
-            throw new Error("No response from OpenAI after multiple attempts");
-          }
-          retryCount++;
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-          continue;
-        }
-        
-        console.log("✅ OpenAI API call successful");
-        break;
-        
-      } catch (error) {
-        console.error(`❌ OpenAI API call failed (attempt ${retryCount + 1}):`, error);
-        
-        if (error.name === 'AbortError') {
-          console.error("🕐 OpenAI API request timed out");
-        }
-        
-        if (retryCount === maxRetries - 1) {
-          throw new Error(`OpenAI API failed after ${maxRetries} attempts: ${error.message}`);
-        }
-        
-        retryCount++;
-        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-      }
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text();
+      console.error("❌ OpenAI API error:", openaiResponse.status, errorText);
+      throw new Error(`OpenAI API error: ${openaiResponse.status}`);
     }
 
-    console.log("🎯 OpenAI raw response:", aiResponse);
+    const openaiData = await openaiResponse.json();
+    const aiResponse = openaiData.choices[0]?.message?.content || '';
+    
+    console.log("🤖 RAW OPENAI RESPONSE:");
+    console.log("=====================================");
+    console.log(aiResponse);
+    console.log("=====================================");
 
-    // Parse the LLM's structured response
-    let parsedResponse;
+    // Parse the AI response
+    let parsedResponse: any;
+    
     try {
       parsedResponse = JSON.parse(aiResponse);
       console.log("✅ Successfully parsed LLM response:", parsedResponse);
@@ -564,181 +677,19 @@ CRITICAL RULES:
     console.log("🎯 Extracted actions:", actions);
     console.log("💬 Final response:", finalResponse);
 
-    // Fallback strategy: If LLM failed to extract actions, try manual parsing
-    let fallbackActions = [];
-    let fallbackResponse = finalResponse;
-    let usedFallback = false;
-    
-    if (!actions || actions.length === 0) {
-      console.log("🚨 LLM returned empty actions - attempting manual transaction parsing as fallback");
-      usedFallback = true;
-      
-      // Manual transaction parsing patterns
-      const transactionPatterns = [
-        // "bought/spent/paid X for Y" or "X for Y"
-        /(?:bought|spent|paid|got|received|earned)\s+(?:\$?)(\d+(?:\.\d{2})?)\s+(?:for|on|at)\s+(.+)/i,
-        // "$X for Y" or "Y for $X"
-        /\$(\d+(?:\.\d{2})?)\s+(?:for|on|at)\s+(.+)/i,
-        /(.+)\s+(?:for|cost|costed)\s+\$(\d+(?:\.\d{2})?)/i,
-        // "Y $X" or "Y - $X"
-        /(.+?)\s+[-–]\s*\$(\d+(?:\.\d{2})?)/i,
-        /(.+?)\s+\$(\d+(?:\.\d{2})?)/i,
-        // Income patterns
-        /(?:got|received|earned|paid)\s+\$(\d+(?:\.\d{2})?)\s+(.+)/i,
-        /\$(\d+(?:\.\d{2})?)\s+(?:salary|bonus|income|payment|freelance|work)/i,
-      ];
-      
-      // Category mapping
-      const categoryMap = {
-        'groceries': 'Groceries', 'grocery': 'Groceries', 'food': 'Groceries',
-        'gas': 'Transportation', 'fuel': 'Transportation', 'uber': 'Transportation', 'taxi': 'Transportation',
-        'restaurant': 'Dining', 'dinner': 'Dining', 'lunch': 'Dining', 'breakfast': 'Dining', 'coffee': 'Dining',
-        'rent': 'Rent', 'utilities': 'Utilities', 'electric': 'Utilities', 'water': 'Utilities',
-        'shopping': 'Shopping', 'clothes': 'Shopping', 'amazon': 'Shopping',
-        'movie': 'Entertainment', 'netflix': 'Entertainment', 'spotify': 'Entertainment',
-        'salary': 'Salary', 'bonus': 'Salary', 'freelance': 'Salary', 'work': 'Salary', 'payment': 'Salary',
-        'health': 'Health', 'doctor': 'Health', 'medicine': 'Health',
-        'gym': 'Health', 'fitness': 'Health'
-      };
-      
-      // Income keywords
-      const incomeKeywords = ['salary', 'bonus', 'freelance', 'work', 'payment', 'income', 'earned', 'received', 'got paid'];
-      
-      // Goal detection patterns
-      const goalPatterns = [
-        /(?:save|saving|goal|target)\s+\$?(\d+(?:,\d{3})*(?:\.\d{2})?)\s+(?:for|towards?)\s+(.+)/i,
-        /(?:want to|need to|plan to)\s+save\s+\$?(\d+(?:,\d{3})*(?:\.\d{2})?)\s+(?:for|towards?)\s+(.+)/i,
-        /(?:create|set up|make)\s+(?:a\s+)?goal\s+(?:to\s+save\s+)?\$?(\d+(?:,\d{3})*(?:\.\d{2})?)\s+(?:for|towards?)\s+(.+)/i,
-        /(?:create|set up|make)\s+(?:a\s+)?goal\s+for\s+(.+?)\s*[-–]\s*(?:target\s+)?\$?(\d+(?:,\d{3})*(?:\.\d{2})?)/i,
-        /(?:goal|target)\s+(?:of\s+)?\$?(\d+(?:,\d{3})*(?:\.\d{2})?)\s+for\s+(.+)/i,
-        /(.+?)\s+goal\s+[-–]\s*(?:target\s+)?\$?(\d+(?:,\d{3})*(?:\.\d{2})?)/i,
-        /save\s+for\s+(.+?)\s*[-–]\s*\$?(\d+(?:,\d{3})*(?:\.\d{2})?)/i
-      ];
-      
-      // Check for goal patterns first
-      for (const pattern of goalPatterns) {
-        const match = message.match(pattern);
-        if (match) {
-          console.log("🎯 Manual goal parsing found match:", match);
-          
-          let amount, title;
-          
-          if (match[1] && match[2]) {
-            // Check if first capture is amount or title
-            if (/^\d+(?:,\d{3})*(?:\.\d{2})?$/.test(match[1])) {
-              amount = parseFloat(match[1].replace(/,/g, ''));
-              title = match[2].trim();
-            } else {
-              amount = parseFloat(match[2].replace(/,/g, ''));
-              title = match[1].trim();
-            }
-          }
-          
-          if (amount && title) {
-            // Clean up title
-            title = title.replace(/^\$/, '').replace(/\s+/g, ' ').trim();
-            title = title.charAt(0).toUpperCase() + title.slice(1); // Capitalize first letter
-            
-            fallbackActions.push({
-              type: 'goal',
-              title: title,
-              target_amount: amount,
-              percentage_allocation: 20
-            });
-            
-            fallbackResponse = `Excellent! 🎯 I've created your goal to save ${settings.currency_symbol}${amount.toLocaleString()} for ${title}. This goal will receive 20% of your income automatically. You're taking great steps toward your financial future! 💪`;
-            
-            console.log("✅ Manual goal parsing successful:", fallbackActions[0]);
-            break;
-          }
-        }
-      }
-      
-      // If no goal found, try transaction patterns
-      if (fallbackActions.length === 0) {
-        for (const pattern of transactionPatterns) {
-          const match = message.match(pattern);
-          if (match) {
-            console.log("🔍 Manual parsing found match:", match);
-            
-            let amount, description;
-            
-            if (match[1] && match[2]) {
-              // Check if first capture is amount or description
-              if (/^\d+(\.\d{2})?$/.test(match[1])) {
-                amount = parseFloat(match[1]);
-                description = match[2].trim();
-              } else {
-                amount = parseFloat(match[2]);
-                description = match[1].trim();
-              }
-            }
-            
-            if (amount && description) {
-              // Determine transaction type
-              const isIncome = incomeKeywords.some(keyword => 
-                message.toLowerCase().includes(keyword.toLowerCase())
-              );
-              
-              // Determine category
-              let category = 'Other';
-              const lowerDesc = description.toLowerCase();
-              const lowerMessage = message.toLowerCase();
-              
-              for (const [keyword, cat] of Object.entries(categoryMap)) {
-                if (lowerDesc.includes(keyword) || lowerMessage.includes(keyword)) {
-                  category = cat;
-                  break;
-                }
-              }
-              
-              // Clean up description
-              description = description.replace(/^\$/, '').replace(/\s+/g, ' ').trim();
-              if (description.length > 50) {
-                description = description.substring(0, 50) + '...';
-              }
-              
-              fallbackActions.push({
-                type: 'transaction',
-                description: description,
-                amount: amount,
-                category: category,
-                transaction_type: isIncome ? 'income' : 'expense',
-                date: new Date().toISOString().split('T')[0]
-              });
-              
-              fallbackResponse = isIncome 
-                ? `Great! 💰 I've recorded your ${settings.currency_symbol}${amount} ${description}. This income will be auto-allocated based on your budget settings!`
-                : `Got it! 📝 I've recorded your ${settings.currency_symbol}${amount} expense for ${description}. Keep tracking your spending!`;
-              
-              console.log("✅ Manual parsing successful:", fallbackActions[0]);
-              break;
-            }
-          }
-        }
-      }
-      
-      if (fallbackActions.length === 0) {
-        console.log("❌ Manual parsing failed - no transaction patterns found");
-        fallbackResponse = `I had trouble understanding that transaction. Could you try rephrasing it? For example: 'Bought groceries for ${settings.currency_symbol}50' or 'Got paid ${settings.currency_symbol}2000 salary'`;
-      }
-    }
-    
-    // Use fallback actions if LLM failed
-    const finalActions = actions.length > 0 ? actions : fallbackActions;
-    const finalResponseText = actions.length > 0 ? finalResponse : fallbackResponse;
-    
-    if (usedFallback && fallbackActions.length > 0) {
-      console.log("🤖 LLM FAILED - Using manual fallback parsing for transaction creation");
-    }
+    console.log("🔍 RESPONSE PROCESSING:");
+    console.log("=====================================");
+    console.log("Actions found:", actions.length);
+    console.log("Response text:", finalResponse);
+    console.log("=====================================");
 
     // Execute the actions (either from LLM or fallback)
     let transactionsCreated = 0;
     let goalsCreated = 0;
     
-    for (let i = 0; i < finalActions.length; i++) {
-      const action = finalActions[i];
-      console.log(`🔄 Processing action ${i + 1}/${finalActions.length}:`, action);
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      console.log(`🔄 Processing action ${i + 1}/${actions.length}:`, action);
       
       try {
         if (action.type === 'transaction') {
@@ -784,7 +735,7 @@ CRITICAL RULES:
           if (action.transaction_type === 'income') {
             console.log("💰 Creating auto-allocations for income...");
             
-            const allocations = [];
+            const allocations: any[] = [];
             const amount = parseFloat(action.amount);
             
             console.log("💰 Income amount:", amount);
@@ -829,24 +780,6 @@ CRITICAL RULES:
                   budget_category: 'goals',
                   is_allocated: true
                 });
-
-                // Update goal progress
-                console.log("🎯 Creating goal allocation for:", goal.title);
-                const { error: goalAllocError } = await supabaseAdmin
-                  .from('goal_allocations')
-                  .insert({
-                    goal_id: goal.id,
-                    user_id: userId,
-                    amount: perGoalAmount,
-                    date: action.date,
-                    transaction_id: insertedTransaction.id
-                  });
-                
-                if (goalAllocError) {
-                  console.error("❌ Goal allocation error:", goalAllocError);
-                } else {
-                  console.log("✅ Goal allocation created for:", goal.title);
-                }
               }
             }
 
@@ -866,6 +799,47 @@ CRITICAL RULES:
               } else {
                 console.log("✅ Auto-allocations created successfully:", insertedAllocations?.length || 0);
                 transactionsCreated += insertedAllocations?.length || 0;
+                
+                // Now create goal allocations for the goal transactions
+                const goalTransactions = insertedAllocations?.filter(tx => tx.budget_category === 'goals') || [];
+                if (goalTransactions.length > 0 && activeGoals.length > 0) {
+                  console.log("🎯 Creating goal allocations for", goalTransactions.length, "transactions");
+                  
+                  const goalAllocations: any[] = [];
+                  for (const goalTransaction of goalTransactions) {
+                    // Extract goal title from transaction description
+                    const goalTitleMatch = goalTransaction.description.match(/Auto-allocation: (.+?) \(/);
+                    if (goalTitleMatch) {
+                      const goalTitle = goalTitleMatch[1];
+                      const matchingGoal = activeGoals.find(g => g.title === goalTitle);
+                      
+                      if (matchingGoal) {
+                        goalAllocations.push({
+                          user_id: userId,
+                          goal_id: matchingGoal.id,
+                          transaction_id: goalTransaction.id,
+                          amount: goalTransaction.amount,
+                          allocation_type: 'auto',
+                          allocation_date: goalTransaction.date,
+                          notes: `Auto-allocated from income: ${action.description}`
+                        });
+                      }
+                    }
+                  }
+                  
+                  if (goalAllocations.length > 0) {
+                    console.log("🎯 Inserting", goalAllocations.length, "goal allocations");
+                    const { error: goalAllocError } = await supabaseAdmin
+                      .from('goal_allocations')
+                      .insert(goalAllocations);
+                    
+                    if (goalAllocError) {
+                      console.error("❌ Goal allocation error:", goalAllocError);
+                    } else {
+                      console.log("✅ Goal allocations created successfully");
+                    }
+                  }
+                }
               }
             }
           }
@@ -942,7 +916,7 @@ CRITICAL RULES:
       },
       {
         user_id: userId,
-        message: finalResponseText,
+        message: finalResponse,
         sender: 'ai',
         created_at: new Date().toISOString()
       }
@@ -969,12 +943,11 @@ CRITICAL RULES:
     return new Response(
       JSON.stringify({
         success: true,
-        response: finalResponseText,
+        response: finalResponse,
         debug: {
           transactionsCreated,
           goalsCreated,
-          actionsProcessed: finalActions.length,
-          usedFallback: usedFallback
+          actionsProcessed: actions.length,
         }
       }),
       {
