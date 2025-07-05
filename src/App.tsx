@@ -47,7 +47,7 @@ function App() {
                 </Layout>
               } />
               <Route path="/summary" element={
-                <Layout title="Monthly Summary" description="View your financial insights and spending analysis">
+                <Layout title="Expense Summary" description="View your financial insights and spending analysis for any date range">
                   <AuthGuard>
                     <SummaryPage />
                   </AuthGuard>

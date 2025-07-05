@@ -203,7 +203,7 @@ export const DataManager: React.FC<DataManagerProps> = ({ onDataChange }) => {
             <li>Click "Refresh Page" to reload all components</li>
             <li>Navigate through all tabs to see the data in action</li>
             <li>Test filtering, editing, and goal tracking features</li>
-            <li>Try the Monthly Summary generation</li>
+                            <li>Try the Expense Summary generation</li>
             <li>Use "Clear All Data" to reset when needed</li>
           </ol>
         </div>
