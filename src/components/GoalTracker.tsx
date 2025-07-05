@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Target, TrendingUp, Plus, X, UserX } from 'lucide-react';
+import { Target, TrendingUp, Plus, X, UserX, RefreshCw, ChevronDown, ChevronUp, ArrowRight, Calendar, DollarSign, PieChart } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrency } from '../contexts/CurrencyContext';
@@ -18,14 +18,39 @@ interface Goal {
   created_at: string;
 }
 
+interface GoalAllocation {
+  id: string;
+  goal_id: string;
+  transaction_id: string;
+  amount: number;
+  allocation_type: 'auto' | 'manual';
+  allocation_date: string;
+  notes: string | null;
+  transaction: {
+    id: string;
+    description: string;
+    amount: number;
+    type: 'income' | 'expense';
+    category: string;
+    date: string;
+    source: string;
+  };
+}
+
+interface GoalWithAllocations extends Goal {
+  allocations: GoalAllocation[];
+}
+
 export const GoalTracker: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
   const { currency } = useCurrency();
-  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goals, setGoals] = useState<GoalWithAllocations[]>([]);
+  const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [hasConnectionError, setHasConnectionError] = useState(false);
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+
   const [newGoal, setNewGoal] = useState({
     title: '',
     target_amount: '',
@@ -33,6 +58,19 @@ export const GoalTracker: React.FC = () => {
   });
   const loadingRef = useRef(false);
   const realtimeChannelRef = useRef<any>(null);
+
+  // Toggle goal expansion
+  const toggleGoalExpansion = (goalId: string) => {
+    setExpandedGoals(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(goalId)) {
+        newSet.delete(goalId);
+      } else {
+        newSet.add(goalId);
+      }
+      return newSet;
+    });
+  };
 
   // Set up real-time subscription for transactions to update goal progress
   const setupRealtimeSubscription = React.useCallback(() => {
@@ -46,7 +84,7 @@ export const GoalTracker: React.FC = () => {
       supabase.removeChannel(realtimeChannelRef.current);
     }
 
-    // Create new subscription for both transactions and goals
+    // Create new subscription for transactions, goals, and goal_allocations
     const channel = supabase
       .channel(`goal-updates:user_id=eq.${user.id}`)
       .on(
@@ -87,6 +125,25 @@ export const GoalTracker: React.FC = () => {
           loadGoals();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'goal_allocations',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('🎯 GoalTracker: Real-time goal allocation update received:', payload);
+          
+          // Show notification for real-time updates
+          setShowUpdateNotification(true);
+          setTimeout(() => setShowUpdateNotification(false), 3000);
+          
+          // Reload goals when goal allocations change (this triggers goal progress updates)
+          loadGoals();
+        }
+      )
       .subscribe((status) => {
         console.log('🎯 GoalTracker: Real-time subscription status:', status);
       });
@@ -121,17 +178,81 @@ export const GoalTracker: React.FC = () => {
     setHasConnectionError(false);
     
     try {
-      // Use the new goal_progress_summary view for better performance
-      const { data, error } = await supabase
-        .from('goal_progress_summary')
+      console.log('🎯 GoalTracker: Loading goals for user:', user.id);
+      
+      // First, get all goals
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('goals')
         .select('*')
         .eq('user_id', user.id)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (goalsError) throw goalsError;
 
-      setGoals(data || []);
+      console.log('🎯 GoalTracker: Found goals:', goalsData?.length || 0);
+
+      // Then, get all goal allocations with transaction details
+      const goalIds = goalsData?.map(g => g.id) || [];
+      let goalsWithAllocations: GoalWithAllocations[] = [];
+
+      if (goalIds.length > 0) {
+        const { data: allocationsData, error: allocationsError } = await supabase
+          .from('goal_allocations')
+          .select(`
+            *,
+            transaction:transactions(
+              id,
+              description,
+              amount,
+              type,
+              category,
+              date,
+              source
+            )
+          `)
+          .in('goal_id', goalIds)
+          .order('allocation_date', { ascending: false });
+
+        if (allocationsError) {
+          console.error('🎯 GoalTracker: Error loading allocations:', allocationsError);
+          goalsWithAllocations = goalsData.map(goal => ({
+            ...goal,
+            allocations: []
+          }));
+        } else {
+          console.log('🎯 GoalTracker: Found allocations:', allocationsData?.length || 0);
+          
+          // Group allocations by goal
+          const allocationsByGoal = (allocationsData || []).reduce((acc: any, allocation) => {
+            if (!acc[allocation.goal_id]) {
+              acc[allocation.goal_id] = [];
+            }
+            acc[allocation.goal_id].push(allocation);
+            return acc;
+          }, {});
+
+          // Calculate allocated amounts and attach allocations to goals
+          goalsWithAllocations = goalsData.map(goal => {
+            const goalAllocations = allocationsByGoal[goal.id] || [];
+            const totalAllocated = goalAllocations.reduce((sum: number, alloc: any) => sum + (alloc.amount || 0), 0);
+            
+            return {
+              ...goal,
+              allocated_amount: totalAllocated,
+              allocations: goalAllocations
+            };
+          });
+        }
+      } else {
+        goalsWithAllocations = goalsData.map(goal => ({
+          ...goal,
+          allocations: []
+        }));
+      }
+
+      console.log('🎯 GoalTracker: Final goals with allocations:', goalsWithAllocations);
+      setGoals(goalsWithAllocations);
       setHasConnectionError(false);
     } catch (error) {
       console.error('Error loading goals:', error);
@@ -141,8 +262,6 @@ export const GoalTracker: React.FC = () => {
       loadingRef.current = false;
     }
   };
-
-
 
   const handleAddGoal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -233,14 +352,24 @@ export const GoalTracker: React.FC = () => {
             <Target className="h-5 w-5 text-slate-600" />
             <h2 className="text-lg font-semibold text-slate-800">Savings Goals</h2>
           </div>
-          <button
-            onClick={() => setShowAddGoal(true)}
-            disabled={!user}
-            className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="text-sm">Add Goal</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => loadGoals()}
+              disabled={!user || isLoading}
+              className="flex items-center gap-2 px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <span className="text-sm">Refresh</span>
+            </button>
+            <button
+              onClick={() => setShowAddGoal(true)}
+              disabled={!user}
+              className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="text-sm">Add Goal</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -329,70 +458,209 @@ export const GoalTracker: React.FC = () => {
             {goals.map((goal) => {
               const progressPercentage = getProgressPercentage(goal.allocated_amount, goal.target_amount);
               const isComplete = progressPercentage >= 100;
+              const isExpanded = expandedGoals.has(goal.id);
+              const hasAllocations = goal.allocations.length > 0;
               
               return (
-                <div key={goal.id} className="border border-slate-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-semibold text-slate-800">{goal.title}</h3>
-                    {isComplete && (
-                      <button
-                        onClick={() => handleCompleteGoal(goal.id)}
-                        className="text-green-600 hover:text-green-700 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
+                <div key={goal.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                  {/* Goal Header */}
+                  <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Target className="h-5 w-5 text-blue-600" />
+                        {goal.title}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        {isComplete && (
+                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                            ✅ Complete
+                          </span>
+                        )}
+                        {hasAllocations && (
+                          <button
+                            onClick={() => toggleGoalExpansion(goal.id)}
+                            className="p-1 text-slate-500 hover:text-blue-600 transition-colors"
+                          >
+                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Progress Overview */}
+                    <div className="grid grid-cols-2 gap-4 mb-3">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-600">
+                          {formatCurrencyWithSymbol(goal.allocated_amount)}
+                        </div>
+                        <div className="text-xs text-slate-500">Current Amount</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-slate-700">
+                          {formatCurrencyWithSymbol(goal.target_amount)}
+                        </div>
+                        <div className="text-xs text-slate-500">Target Amount</div>
+                      </div>
+                    </div>
+                    
+                    {/* Progress Bar */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium text-slate-700">
+                          {progressPercentage.toFixed(1)}% Complete
+                        </span>
+                        {goal.percentage_allocation && (
+                          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                            {goal.percentage_allocation.toFixed(1)}% of income
+                          </span>
+                        )}
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-3">
+                        <div
+                          className={`h-3 rounded-full transition-all duration-500 ${
+                            isComplete ? 'bg-gradient-to-r from-green-500 to-green-600' : 'bg-gradient-to-r from-blue-500 to-indigo-600'
+                          }`}
+                          style={{ width: `${Math.min(progressPercentage, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Goal Details */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        {hasAllocations && (
+                          <button
+                            onClick={() => toggleGoalExpansion(goal.id)}
+                            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 transition-colors"
+                          >
+                            <PieChart className="h-4 w-4" />
+                            {goal.allocations.length} contributions
+                          </button>
+                        )}
+                        {goal.target_date && (
+                          <span className="flex items-center gap-1 text-sm text-slate-500">
+                            <Calendar className="h-4 w-4" />
+                            {formatDate(goal.target_date)}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {isComplete && (
+                        <button
+                          onClick={() => handleCompleteGoal(goal.id)}
+                          className="px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm"
+                        >
+                          Mark Complete
+                        </button>
+                      )}
+                    </div>
                   </div>
                   
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-slate-600">
-                      {formatCurrencyWithSymbol(goal.allocated_amount)}
-                    </span>
-                    <span className="text-sm text-slate-500">
-                      of {formatCurrencyWithSymbol(goal.target_amount)}
-                    </span>
-                  </div>
-                  
-                  {goal.percentage_allocation && (
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                        {goal.percentage_allocation.toFixed(1)}% of income allocated
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {progressPercentage.toFixed(1)}% complete
-                      </span>
+                  {/* Expanded Allocations Breakdown */}
+                  {isExpanded && hasAllocations && (
+                    <div className="border-t border-slate-200">
+                      <div className="p-4 bg-slate-50">
+                        <h4 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+                          <DollarSign className="h-4 w-4 text-green-600" />
+                          Money Flow Breakdown
+                        </h4>
+                        
+                        <div className="space-y-3">
+                          {goal.allocations.map((allocation, index) => (
+                            <div key={allocation.id} className="bg-white rounded-lg p-3 border border-slate-200">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      allocation.allocation_type === 'auto' 
+                                        ? 'bg-blue-100 text-blue-800' 
+                                        : 'bg-purple-100 text-purple-800'
+                                    }`}>
+                                      {allocation.allocation_type === 'auto' ? '🤖 Auto' : '✋ Manual'}
+                                    </span>
+                                    <span className="text-xs text-slate-500">
+                                      {formatDate(allocation.allocation_date)}
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="font-medium text-slate-800">
+                                      {allocation.transaction.description}
+                                    </span>
+                                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                                    <span className="text-sm text-slate-600">
+                                      {goal.title}
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-4 text-sm">
+                                    <span className={`px-2 py-1 rounded text-xs ${
+                                      allocation.transaction.type === 'income' 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : 'bg-red-100 text-red-800'
+                                    }`}>
+                                      {allocation.transaction.category}
+                                    </span>
+                                    <span className="text-slate-500">
+                                      from {formatCurrencyWithSymbol(allocation.transaction.amount)} {allocation.transaction.type}
+                                    </span>
+                                  </div>
+                                  
+                                  {allocation.notes && (
+                                    <div className="mt-2 text-sm text-slate-600 italic">
+                                      "{allocation.notes}"
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="text-right">
+                                  <div className="text-lg font-bold text-green-600">
+                                    +{formatCurrencyWithSymbol(allocation.amount)}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                    {((allocation.amount / goal.target_amount) * 100).toFixed(1)}% of goal
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Summary Stats */}
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                          <div className="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                              <div className="text-lg font-bold text-blue-600">
+                                {goal.allocations.filter(a => a.allocation_type === 'auto').length}
+                              </div>
+                              <div className="text-xs text-slate-600">Auto Allocations</div>
+                            </div>
+                            <div>
+                              <div className="text-lg font-bold text-purple-600">
+                                {goal.allocations.filter(a => a.allocation_type === 'manual').length}
+                              </div>
+                              <div className="text-xs text-slate-600">Manual Allocations</div>
+                            </div>
+                            <div>
+                              <div className="text-lg font-bold text-green-600">
+                                {formatCurrencyWithSymbol(goal.target_amount - goal.allocated_amount)}
+                              </div>
+                              <div className="text-xs text-slate-600">Remaining</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                   
-                  <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
-                    <div
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        isComplete ? 'bg-green-500' : 'bg-blue-500'
-                      }`}
-                      style={{ width: `${progressPercentage}%` }}
-                    />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleCompleteGoal(goal.id)}
-                        className="p-2 text-slate-400 hover:text-green-500 transition-colors"
-                      >
-                        <TrendingUp className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    {goal.target_date && (
-                      <span className="text-sm text-slate-500">
-                        by {formatDate(goal.target_date)}
-                      </span>
-                    )}
-                  </div>
-                  
+                  {/* Achievement Badge */}
                   {isComplete && (
-                    <div className="mt-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm text-center">
-                      🎉 Goal achieved! Great job!
+                    <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 text-white text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-2xl">🎉</span>
+                        <span className="font-medium">Congratulations! Goal achieved!</span>
+                        <span className="text-2xl">🎉</span>
+                      </div>
                     </div>
                   )}
                 </div>

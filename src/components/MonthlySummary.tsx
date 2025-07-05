@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { BarChart3, Calendar, TrendingUp, Loader2, DollarSign, Target, TrendingDown, AlertCircle, RefreshCw, PieChart, Activity } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { BarChart3, Calendar, TrendingUp, Loader2, DollarSign, Target, TrendingDown, AlertCircle, RefreshCw, PieChart, Activity, CalendarDays } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrency } from '../contexts/CurrencyContext';
@@ -23,6 +23,11 @@ interface SummaryData {
   daysWithTransactions: number;
 }
 
+interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
 export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
   const { user } = useAuth();
   const { currency } = useCurrency();
@@ -32,10 +37,34 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
   const [showSummary, setShowSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastGenerated, setLastGenerated] = useState<Date | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange>({ startDate: '', endDate: '' });
   const loadingRef = useRef(false);
+
+  // Set default date range to current month
+  useEffect(() => {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    setDateRange({
+      startDate: startOfMonth.toISOString().split('T')[0],
+      endDate: endOfMonth.toISOString().split('T')[0]
+    });
+  }, []);
 
   const generateSummary = async () => {
     if (!user || loadingRef.current) return;
+    
+    // Validate date range
+    if (!dateRange.startDate || !dateRange.endDate) {
+      setError('Please select a valid date range');
+      return;
+    }
+    
+    if (new Date(dateRange.startDate) > new Date(dateRange.endDate)) {
+      setError('Start date must be before end date');
+      return;
+    }
     
     loadingRef.current = true;
     setIsLoading(true);
@@ -43,27 +72,27 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
     setError(null);
 
     try {
-      console.log('📊 MonthlySummary: Generating summary for user:', user.id);
+      console.log('📊 ExpenseSummary: Generating summary for user:', user.id);
+      console.log('📊 ExpenseSummary: Date range:', dateRange);
       
-      const currentDate = new Date();
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
         throw new Error('No active session found');
       }
 
-      console.log('📊 MonthlySummary: Calling monthly-summary function...');
+      console.log('📊 ExpenseSummary: Calling monthly-summary function...');
       
       // Use direct fetch for better control
       const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/monthly-summary`;
       
       const requestBody = {
-        month: currentDate.getMonth() + 1,
-        year: currentDate.getFullYear(),
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
         userId: user.id
       };
 
-      console.log('📊 MonthlySummary: Request body:', requestBody);
+      console.log('📊 ExpenseSummary: Request body:', requestBody);
 
       const response = await fetch(functionUrl, {
         method: 'POST',
@@ -75,16 +104,16 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
         body: JSON.stringify(requestBody),
       });
 
-      console.log('📊 MonthlySummary: Response status:', response.status);
+      console.log('📊 ExpenseSummary: Response status:', response.status);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('📊 MonthlySummary: Response error:', errorText);
+        console.error('📊 ExpenseSummary: Response error:', errorText);
         throw new Error(`Server error: ${response.status}`);
       }
 
       const result = await response.json();
-      console.log('📊 MonthlySummary: Response data:', result);
+      console.log('📊 ExpenseSummary: Response data:', result);
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to generate summary');
@@ -96,7 +125,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
       setError(null);
 
     } catch (error) {
-      console.error('📊 MonthlySummary: Error generating summary:', error);
+      console.error('📊 ExpenseSummary: Error generating summary:', error);
       setError(error instanceof Error ? error.message : 'Failed to generate summary');
       setSummary('');
       setSummaryData(null);
@@ -119,8 +148,19 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
     ));
   };
 
-  const getCurrentMonthName = () => {
-    return new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+  const getDateRangeLabel = () => {
+    if (!dateRange.startDate || !dateRange.endDate) return 'Select Date Range';
+    
+    const start = new Date(dateRange.startDate);
+    const end = new Date(dateRange.endDate);
+    
+    // Check if it's the same month
+    if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+      return start.toLocaleString('default', { month: 'long', year: 'numeric' });
+    }
+    
+    // Different months or years
+    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
   };
 
   const getProgressBarColor = (savingsRate: number) => {
@@ -137,6 +177,20 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
     return 'Needs Improvement';
   };
 
+  const handleDateRangeChange = (field: 'startDate' | 'endDate', value: string) => {
+    setDateRange(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    
+    // Clear previous results when date range changes
+    if (showSummary) {
+      setSummary('');
+      setSummaryData(null);
+      setLastGenerated(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden">
       {/* Header */}
@@ -147,14 +201,14 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
               <BarChart3 className="h-6 w-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">Monthly Summary</h2>
-              <p className="text-sm text-slate-600">{getCurrentMonthName()}</p>
+              <h2 className="text-xl font-bold text-slate-800">Expense Summary</h2>
+              <p className="text-sm text-slate-600">{getDateRangeLabel()}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={generateSummary}
-              disabled={isLoading || !user}
+              disabled={isLoading || !user || !dateRange.startDate || !dateRange.endDate}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
               {isLoading ? (
@@ -166,6 +220,29 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                 {isLoading ? 'Generating...' : 'Generate Summary'}
               </span>
             </button>
+          </div>
+        </div>
+        
+        {/* Date Range Picker */}
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-slate-500" />
+            <label className="text-sm font-medium text-slate-700">Date Range:</label>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateRange.startDate}
+              onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
+              className="px-3 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-slate-500 text-sm">to</span>
+            <input
+              type="date"
+              value={dateRange.endDate}
+              onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
+              className="px-3 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
         </div>
         
@@ -183,10 +260,10 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
             <div className="max-w-md mx-auto">
               <Calendar className="h-16 w-16 mx-auto mb-4 text-slate-300" />
               <h3 className="text-xl font-semibold text-slate-800 mb-2">
-                Get Your Financial Health Report
+                Get Your Financial Analytics Report
               </h3>
               <p className="text-slate-600 mb-6">
-                Discover insights about your spending patterns, savings progress, and get personalized recommendations from your AI financial coach.
+                Select a date range and discover insights about your spending patterns, savings progress, and get personalized recommendations from your AI financial coach.
               </p>
               <div className="grid grid-cols-2 gap-4 text-sm text-slate-500">
                 <div className="flex items-center gap-2">
@@ -259,7 +336,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                       </div>
                       <div>
                         <h3 className="font-semibold text-green-900">Total Income</h3>
-                        <p className="text-sm text-green-700">This month</p>
+                        <p className="text-sm text-green-700">Selected period</p>
                       </div>
                     </div>
                     <p className="text-2xl font-bold text-green-800">
@@ -279,7 +356,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
                       </div>
                       <div>
                         <h3 className="font-semibold text-red-900">Total Expenses</h3>
-                        <p className="text-sm text-red-700">This month</p>
+                        <p className="text-sm text-red-700">Selected period</p>
                       </div>
                     </div>
                     <p className="text-2xl font-bold text-red-800">
