@@ -7,6 +7,8 @@ import { GoalsPage } from './pages/GoalsPage';
 import { SummaryPage } from './pages/SummaryPage';
 import { DataPage } from './pages/DataPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ChatHistoryPage } from './pages/ChatHistoryPage';
+import SettingsPage from './pages/SettingsPage';
 import { AuthProvider } from './contexts/AuthContext';
 import { Header } from './components/Header';
 import { AuthGuard } from './components/AuthGuard';
@@ -62,6 +64,18 @@ function App() {
                     <ProfilePage />
                   </AuthGuard>
                 </Layout>
+              } />
+              <Route path="/chat-history" element={
+                <Layout title="Chat History" description="View and manage your conversation history">
+                  <AuthGuard>
+                    <ChatHistoryPage />
+                  </AuthGuard>
+                </Layout>
+              } />
+              <Route path="/settings" element={
+                <AuthGuard>
+                  <SettingsPage />
+                </AuthGuard>
               } />
             </Routes>
           </main>

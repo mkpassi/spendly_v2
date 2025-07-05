@@ -9,6 +9,8 @@ import {
   Target,
   BarChart3,
   Database,
+  History,
+  Settings,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -49,15 +51,14 @@ export const LayoutComponent: React.FC<LayoutProps> = ({
       case '/summary':
         breadcrumbs.push({ name: 'Summary', href: '/summary', icon: BarChart3 });
         break;
-      case '/data':
-        breadcrumbs.push({
-          name: 'Data Manager',
-          href: '/data',
-          icon: Database,
-        });
-        break;
       case '/profile':
         breadcrumbs.push({ name: 'Profile', href: '/profile', icon: User });
+        break;
+      case '/chat-history':
+        breadcrumbs.push({ name: 'Chat History', href: '/chat-history', icon: History });
+        break;
+      case '/settings':
+        breadcrumbs.push({ name: 'Settings', href: '/settings', icon: Settings });
         break;
     }
 
@@ -66,10 +67,11 @@ export const LayoutComponent: React.FC<LayoutProps> = ({
 
   const navigationItems = [
     { name: 'AI Chat', href: '/chat', icon: MessageCircle },
+    { name: 'Chat History', href: '/chat-history', icon: History },
     { name: 'Transactions', href: '/transactions', icon: List },
     { name: 'Goals', href: '/goals', icon: Target },
     { name: 'Summary', href: '/summary', icon: BarChart3 },
-    { name: 'Data Manager', href: '/data', icon: Database },
+    { name: 'Settings', href: '/settings', icon: Settings },
     { name: 'Profile', href: '/profile', icon: User },
   ];
 

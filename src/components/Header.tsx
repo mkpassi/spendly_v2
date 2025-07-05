@@ -8,7 +8,8 @@ import {
   Settings, 
   LogOut, 
   ChevronDown, 
-  Wallet 
+  Wallet,
+  History
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -118,8 +119,16 @@ export const Header: React.FC = () => {
                           <User className="h-4 w-4" />
                           <span>View Profile</span>
                         </Link>
-                        <Link to="/profile" onClick={() => setShowUserMenu(false)} className="flex items-center gap-3 px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
+                        <Link to="/chat-history" onClick={() => setShowUserMenu(false)} className="flex items-center gap-3 px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
+                          <History className="h-4 w-4" />
+                          <span>Chat History</span>
+                        </Link>
+                        <Link to="/settings" onClick={() => setShowUserMenu(false)} className="flex items-center gap-3 px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
                           <Settings className="h-4 w-4" />
+                          <span>Budget Settings</span>
+                        </Link>
+                        <Link to="/profile" onClick={() => setShowUserMenu(false)} className="flex items-center gap-3 px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors">
+                          <User className="h-4 w-4" />
                           <span>Account Settings</span>
                         </Link>
                       </div>

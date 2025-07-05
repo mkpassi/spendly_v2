@@ -65,9 +65,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         previousUserRef.current = session?.user ?? null;
         setLoading(false);
         
-        // Redirect to chat page when user signs in
-        if (event === 'SIGNED_IN' && session?.user && !previousUser) {
-          console.log('🚀 AuthContext: Redirecting to chat page');
+        // Only redirect to chat page when user signs in from the landing page
+        if (event === 'SIGNED_IN' && session?.user && !previousUser && window.location.pathname === '/') {
+          console.log('🚀 AuthContext: Redirecting to chat page from landing page');
           navigate('/chat');
         }
       }

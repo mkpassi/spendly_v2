@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MessageCircle, Loader2 } from 'lucide-react';
+import { Send, MessageCircle, Loader2, Trash2, Bot, BarChart3 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -35,6 +35,60 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [userId]);
 
+  // Save conversation when user leaves the page
+  useEffect(() => {
+    const saveConversationOnUnload = async () => {
+      if (!userId) return;
+      
+      const actualMessages = messages.filter(m => m.id !== 'welcome' && m.id !== 'error');
+      
+      if (actualMessages.length > 0) {
+        const sessionTitle = `Chat - ${new Date().toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        })}`;
+
+        const sessionMessages = actualMessages.map(msg => ({
+          message: msg.message,
+          sender: msg.sender,
+          timestamp: msg.created_at
+        }));
+
+        const lastMessage = actualMessages[actualMessages.length - 1]?.message || '';
+
+        // Use sendBeacon for reliable data sending on page unload
+        const sessionData = {
+          user_id: userId,
+          title: sessionTitle,
+          messages: sessionMessages,
+          message_count: sessionMessages.length,
+          last_message: lastMessage,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        try {
+          // Try to save using supabase first
+          await supabase.from('chat_sessions').insert([sessionData]);
+          console.log('✅ Chat session saved on page unload');
+        } catch (error) {
+          console.error('Error saving chat session on unload:', error);
+        }
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      saveConversationOnUnload();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [userId, messages]);
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     scrollToBottom();
@@ -47,6 +101,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const loadChatHistory = async () => {
     if (!userId) return;
     try {
+      // Load from chat_messages table for current conversation
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
@@ -98,71 +153,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setMessages(prev => [...prev, tempUserMessage]);
 
     try {
-      // Check if this looks like a transaction
-      const isTransaction = /\$|dollar|paid|bought|spent|earned|salary|income|expense/.test(userMessage.toLowerCase());
-      
-      if (isTransaction) {
-        // Try to parse as transaction first
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) throw new Error("User not authenticated");
-
-          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-transactions`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              text: userMessage,
-              // userId is implicitly handled by Supabase function with user's JWT
-            })
-          });
-
-          const result = await response.json();
-          
-          if (result.success && result.transactions.length > 0) {
-            const transaction = result.transactions[0];
-            const aiResponse = `Got it! Added ${transaction.type === 'income' ? 'income' : 'expense'} of $${transaction.amount} for ${transaction.description} in ${transaction.category}. 📊\n\nKeep tracking your finances - you're doing great!`;
-            
-            const aiMessage: ChatMessage = {
-              id: `ai-${Date.now()}`,
-              message: aiResponse,
-              sender: 'ai',
-              created_at: new Date().toISOString()
-            };
-            
-            setMessages(prev => [...prev, aiMessage]);
-            onTransactionAdded?.();
-            return;
-          }
-        } catch (parseError) {
-          console.log('Transaction parsing failed, falling back to chat:', parseError);
-        }
-      }
-
-      // Fall back to regular chat response
-      await handleChatResponse(userMessage);
-    } catch (error) {
-      console.error('Error sending message:', error);
-      const errorMessage: ChatMessage = {
-        id: `error-${Date.now()}`,
-        message: "I'm having trouble right now. Please try again! 💡 Note: AI features require OpenAI API key configuration in Supabase.",
-        sender: 'ai',
-        created_at: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleChatResponse = async (message: string) => {
-    if (!userId) return;
-    try {
+      // Get session for API call
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("User not authenticated");
 
+      // Use only chat-response function - let LLM handle all decisions
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat-response`, {
         method: 'POST',
         headers: {
@@ -170,8 +165,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message,
-          // userId is implicitly handled by Supabase function with user's JWT
+          message: userMessage,
         })
       });
 
@@ -185,20 +179,26 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           created_at: new Date().toISOString()
         };
         setMessages(prev => [...prev, aiMessage]);
+        
+        // Refresh data if it might have been a transaction or goal
+        onTransactionAdded?.();
       } else {
         throw new Error(result.error || 'Chat response failed');
       }
     } catch (error) {
-      console.error('Chat response error:', error);
+      console.error('Error sending message:', error);
+      
       // Provide a helpful fallback response
-      const fallbackResponse = getFallbackResponse(message);
-      const aiMessage: ChatMessage = {
-        id: `ai-${Date.now()}`,
+      const fallbackResponse = getFallbackResponse(userMessage);
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
         message: fallbackResponse,
         sender: 'ai',
         created_at: new Date().toISOString()
       };
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -217,7 +217,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       return "I'd love to help you analyze your spending! 📊\n\nTry the 'Summary' tab for insights, or tell me about specific expenses like:\n• 'Spent $50 on groceries'\n• 'Paid $25 for gas'\n\nI'll help you track everything!";
     }
     
-    return "Thanks for your message! I'm your financial wellness coach. 😊\n\nI can help you track expenses, set savings goals, and analyze your spending patterns.\n\n💡 Note: Full AI features require OpenAI API configuration. Try the 'Data' tab to add sample transactions for testing!";
+    return "I'm having trouble right now, but I'm still here to help! 😊\n\nI can help you track expenses, set savings goals, and analyze your spending patterns.\n\n💡 Note: Full AI features require OpenAI API configuration. Try the 'Data' tab to add sample transactions for testing!";
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -236,10 +236,129 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     ));
   };
 
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+    
+    if (diffInHours < 24) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
+             date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  };
+
+  const clearChat = async () => {
+    if (!userId) return;
+    
+    try {
+      // First, save current conversation to chat_sessions if there are actual messages
+      const actualMessages = messages.filter(m => m.id !== 'welcome' && m.id !== 'error');
+      
+      if (actualMessages.length > 0) {
+        const today = new Date().toISOString().split('T')[0];
+        const sessionTitle = `Chat - ${new Date().toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        })}`;
+
+        // Convert messages to session format
+        const sessionMessages = actualMessages.map(msg => ({
+          message: msg.message,
+          sender: msg.sender,
+          timestamp: msg.created_at
+        }));
+
+        const lastMessage = actualMessages[actualMessages.length - 1]?.message || '';
+
+        // Save to chat_sessions
+        const { error: sessionError } = await supabase
+          .from('chat_sessions')
+          .insert([{
+            user_id: userId,
+            title: sessionTitle,
+            messages: sessionMessages,
+            message_count: sessionMessages.length,
+            last_message: lastMessage,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+
+        if (sessionError) {
+          console.error('Error saving chat session:', sessionError);
+        } else {
+          console.log('✅ Chat session saved successfully');
+        }
+      }
+      
+      // Clear current conversation from chat_messages
+      const { error } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      
+      // Clear from UI and show welcome message
+      const welcomeMessage = {
+        id: 'welcome',
+        message: "Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for $75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!",
+        sender: 'ai' as const,
+        created_at: new Date().toISOString()
+      };
+      setMessages([welcomeMessage]);
+    } catch (error) {
+      console.error('Error clearing chat:', error);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="bg-white rounded-lg shadow-md overflow-hidden h-full flex flex-col">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 px-6 py-4 border-b border-slate-200">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg">
+              <Bot className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">AI Financial Coach</h2>
+              <p className="text-sm text-slate-600">Chat with your personal AI assistant to track expenses and get financial insights</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {user && hasStartedChat && (
+              <>
+                <div className="relative group">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-white/80 rounded-lg border border-slate-200 shadow-sm">
+                    <BarChart3 className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-slate-700">{messages.filter(m => m.sender === 'user').length}</span>
+                  </div>
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10">
+                    User Messages
+                  </div>
+                </div>
+                <div className="relative group">
+                  <button
+                    onClick={clearChat}
+                    className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 border border-slate-200 hover:border-red-200 shadow-sm bg-white/80"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10">
+                    Clear Chat
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      
       {/* Messages Container */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative bg-slate-50">
         <div className="flex-1 max-w-3xl mx-auto w-full">
           {authLoading || isInitialLoad ? (
             <div className="flex items-center justify-center h-full">
@@ -254,20 +373,41 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex items-end h-full p-6">
-              <div className="w-full">
-                <div className="flex justify-start">
-                  <div className="max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-white text-slate-800 border border-slate-200">
-                    {formatMessage("Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for $75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!")}
-                  </div>
+            <div className="flex items-center justify-center h-full p-6">
+              <div className="text-center max-w-md">
+                <div className="p-4 bg-blue-100 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                  <MessageCircle className="h-8 w-8 text-blue-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">Welcome to Your AI Financial Coach</h3>
+                <p className="text-slate-600 mb-4">
+                  Start a conversation to track expenses, set savings goals, and get personalized financial insights.
+                </p>
+                <div className="bg-blue-50 rounded-lg p-4 text-sm text-slate-700">
+                  <p className="font-medium mb-2">💡 Try asking:</p>
+                  <ul className="text-left space-y-1">
+                    <li>• "I spent $50 on groceries"</li>
+                    <li>• "I want to save $1000 for vacation"</li>
+                    <li>• "Show me my spending summary"</li>
+                  </ul>
                 </div>
               </div>
             </div>
           ) : messages.length === 1 && messages[0].id === 'welcome' ? (
-            <div className="flex items-end h-full p-6">
-              <div className="w-full">
-                <div className="flex justify-start">
-                  <div className="max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-white text-slate-800 border border-slate-200">
+            <div className="flex items-center justify-center h-full p-6">
+              <div className="text-center max-w-lg">
+                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-50 to-purple-50 px-6 py-4 border-b border-slate-100">
+                    <div className="flex items-center justify-center gap-3">
+                      <div className="p-3 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-sm">
+                        <Bot className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <div className="text-lg font-bold text-slate-800">AI Financial Coach</div>
+                        <div className="text-sm text-slate-500">Spendly Assistant</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-6 text-left">
                     {formatMessage(messages[0].message)}
                   </div>
                 </div>
@@ -275,7 +415,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
           ) : (
             <div className="h-full p-6 overflow-y-auto">
-              <div className="space-y-4">
+              <div className="space-y-6 max-w-5xl mx-auto">
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
@@ -284,13 +424,46 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     }`}
                   >
                     <div
-                      className={`max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${
+                      className={`max-w-md lg:max-w-lg ${
                         msg.sender === 'user'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-white text-slate-800 border border-slate-200'
+                          ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white px-5 py-4 rounded-2xl rounded-br-md shadow-lg'
+                          : 'bg-white text-slate-800 border border-slate-200 shadow-lg rounded-2xl rounded-bl-md overflow-hidden'
                       }`}
                     >
-                      {formatMessage(msg.message)}
+                      {msg.sender === 'ai' && (
+                        <div className="bg-gradient-to-r from-blue-50 to-purple-50 px-5 py-3 border-b border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg shadow-sm">
+                                <Bot className="h-4 w-4 text-white" />
+                              </div>
+                              <div>
+                                <div className="text-sm font-semibold text-slate-800">AI Financial Coach</div>
+                                <div className="text-xs text-slate-500">Spendly Assistant</div>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {formatTimestamp(msg.created_at)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className={`leading-relaxed ${msg.sender === 'ai' ? 'px-5 py-5' : 'py-1'}`}>
+                        {msg.sender === 'user' && (
+                          <div className="flex items-center justify-between mb-3 opacity-90">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 bg-white rounded-full"></div>
+                              <div className="text-xs font-medium">You</div>
+                            </div>
+                            <div className="text-xs text-blue-200">
+                              {formatTimestamp(msg.created_at)}
+                            </div>
+                          </div>
+                        )}
+                        <div className={msg.sender === 'user' ? 'font-medium px-5 pb-4' : ''}>
+                          {formatMessage(msg.message)}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -302,8 +475,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Input */}
-      <div className="bg-white border-t border-slate-200">
-        <div className="max-w-3xl mx-auto p-4">
+      <div className="bg-white border-t border-slate-200 p-4">
+        <div className="max-w-4xl mx-auto">
           <div className="relative">
             <textarea
               disabled={!user || authLoading}
@@ -315,18 +488,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   ? 'Ask about your finances or add a transaction...'
                   : 'Please log in to chat'
               }
-              className="w-full h-12 p-3 pr-20 rounded-lg bg-slate-100 border-2 border-transparent focus:border-blue-500 focus:bg-white focus:outline-none transition resize-none overflow-hidden"
+              className="w-full h-12 p-3 pr-14 rounded-lg bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white focus:outline-none transition-all duration-200 resize-none overflow-hidden placeholder:text-slate-400"
               rows={1}
             />
             <button
               onClick={handleSendMessage}
               disabled={!inputMessage.trim() || isLoading || !user}
-              className="absolute right-3 top-1/2 -translate-y-1/2 bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
               {isLoading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Send className="h-5 w-5" />
+                <Send className="h-4 w-4" />
               )}
             </button>
           </div>

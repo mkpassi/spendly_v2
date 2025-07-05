@@ -7,9 +7,12 @@ interface Goal {
   id: string;
   title: string;
   target_amount: number;
-  current_amount: number;
+  allocated_amount: number;
+  percentage_allocation: number;
   target_date: string | null;
   status: string;
+  is_active: boolean;
+  completion_date: string | null;
   created_at: string;
 }
 
@@ -19,22 +22,93 @@ export const GoalTracker: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [hasConnectionError, setHasConnectionError] = useState(false);
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
   const [newGoal, setNewGoal] = useState({
     title: '',
     target_amount: '',
     target_date: ''
   });
   const loadingRef = useRef(false);
+  const realtimeChannelRef = useRef<any>(null);
+
+  // Set up real-time subscription for transactions to update goal progress
+  const setupRealtimeSubscription = React.useCallback(() => {
+    if (!user?.id) return;
+    
+    console.log('🎯 GoalTracker: Setting up real-time subscription for user:', user.id);
+    
+    // Clean up existing subscription
+    if (realtimeChannelRef.current) {
+      console.log('🎯 GoalTracker: Cleaning up existing subscription');
+      supabase.removeChannel(realtimeChannelRef.current);
+    }
+
+    // Create new subscription for both transactions and goals
+    const channel = supabase
+      .channel(`goal-updates:user_id=eq.${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('🎯 GoalTracker: Real-time transaction update received:', payload);
+          
+          // Show notification for real-time updates
+          setShowUpdateNotification(true);
+          setTimeout(() => setShowUpdateNotification(false), 3000);
+          
+          // Reload goals to recalculate progress when transactions change
+          loadGoals();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'goals',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('🎯 GoalTracker: Real-time goal update received:', payload);
+          
+          // Show notification for real-time updates
+          setShowUpdateNotification(true);
+          setTimeout(() => setShowUpdateNotification(false), 3000);
+          
+          // Reload goals when goals are added/updated/deleted
+          loadGoals();
+        }
+      )
+      .subscribe((status) => {
+        console.log('🎯 GoalTracker: Real-time subscription status:', status);
+      });
+
+    realtimeChannelRef.current = channel;
+  }, [user?.id]);
 
   useEffect(() => {
     if (user && !loadingRef.current) {
       loadGoals();
+      setupRealtimeSubscription();
     } else if (!authLoading) {
       setIsLoading(false);
       setGoals([]);
       setHasConnectionError(false);
     }
-  }, [user, authLoading]);
+
+    // Cleanup subscription on component unmount or user change
+    return () => {
+      if (realtimeChannelRef.current) {
+        console.log('🎯 GoalTracker: Cleaning up real-time subscription');
+        supabase.removeChannel(realtimeChannelRef.current);
+      }
+    };
+  }, [user, authLoading, setupRealtimeSubscription]);
 
   const loadGoals = async () => {
     if (!user || loadingRef.current) return;
@@ -44,27 +118,17 @@ export const GoalTracker: React.FC = () => {
     setHasConnectionError(false);
     
     try {
+      // Use the new goal_progress_summary view for better performance
       const { data, error } = await supabase
-        .from('goals')
+        .from('goal_progress_summary')
         .select('*')
         .eq('user_id', user.id)
-        .eq('status', 'active')
+        .eq('is_active', true)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      // Calculate current progress for each goal
-      const goalsWithProgress = await Promise.all(
-        (data || []).map(async (goal) => {
-          const progress = await calculateGoalProgress(goal.id, goal.created_at);
-          return {
-            ...goal,
-            current_amount: progress
-          };
-        })
-      );
-
-      setGoals(goalsWithProgress);
+      setGoals(data || []);
       setHasConnectionError(false);
     } catch (error) {
       console.error('Error loading goals:', error);
@@ -75,35 +139,7 @@ export const GoalTracker: React.FC = () => {
     }
   };
 
-  const calculateGoalProgress = async (goalId: string, goalCreatedAt: string) => {
-    if (!user) return 0;
-    try {
-      // Get transactions since goal was created
-      const { data: transactions, error } = await supabase
-        .from('transactions')
-        .select('amount, type')
-        .eq('user_id', user.id)
-        .gte('created_at', goalCreatedAt);
 
-      if (error) throw error;
-
-      if (!transactions) return 0;
-
-      // Calculate net savings since goal creation
-      const totalIncome = transactions
-        .filter(t => t.type === 'income')
-        .reduce((sum, t) => sum + parseFloat(t.amount.toString()), 0);
-
-      const totalExpenses = transactions
-        .filter(t => t.type === 'expense')
-        .reduce((sum, t) => sum + parseFloat(t.amount.toString()), 0);
-
-      return Math.max(0, totalIncome - totalExpenses);
-    } catch (error) {
-      console.error('Error calculating goal progress:', error);
-      return 0;
-    }
-  };
 
   const handleAddGoal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,14 +154,16 @@ export const GoalTracker: React.FC = () => {
           title: newGoal.title,
           target_amount: parseFloat(newGoal.target_amount),
           target_date: newGoal.target_date || null,
-          status: 'active'
+          status: 'active',
+          is_active: true,
+          allocated_amount: 0
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      setGoals(prev => [{ ...data, current_amount: 0 }, ...prev]);
+      setGoals(prev => [{ ...data, allocated_amount: 0 }, ...prev]);
       setNewGoal({ title: '', target_amount: '', target_date: '' });
       setShowAddGoal(false);
     } catch (error) {
@@ -137,7 +175,11 @@ export const GoalTracker: React.FC = () => {
     try {
       const { error } = await supabase
         .from('goals')
-        .update({ status: 'completed' })
+        .update({ 
+          status: 'completed',
+          is_active: false,
+          completion_date: new Date().toISOString()
+        })
         .eq('id', goalId);
 
       if (error) throw error;
@@ -176,7 +218,14 @@ export const GoalTracker: React.FC = () => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden">
+    <div className="bg-white rounded-lg shadow-md overflow-hidden relative">
+      {/* Real-time Update Notification */}
+      {showUpdateNotification && (
+        <div className="absolute top-2 right-2 bg-blue-500 text-white px-3 py-1 rounded-full text-sm font-medium shadow-lg z-10 animate-pulse">
+          🎯 Goals updated!
+        </div>
+      )}
+      
       {/* Header */}
       <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
         <div className="flex items-center justify-between">
@@ -278,7 +327,7 @@ export const GoalTracker: React.FC = () => {
         ) : (
           <div className="space-y-6">
             {goals.map((goal) => {
-              const progressPercentage = getProgressPercentage(goal.current_amount, goal.target_amount);
+              const progressPercentage = getProgressPercentage(goal.allocated_amount, goal.target_amount);
               const isComplete = progressPercentage >= 100;
               
               return (
@@ -297,12 +346,23 @@ export const GoalTracker: React.FC = () => {
                   
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-slate-600">
-                      {formatCurrency(goal.current_amount)}
+                      {formatCurrency(goal.allocated_amount)}
                     </span>
                     <span className="text-sm text-slate-500">
                       of {formatCurrency(goal.target_amount)}
                     </span>
                   </div>
+                  
+                  {goal.percentage_allocation && (
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        {goal.percentage_allocation.toFixed(1)}% of income allocated
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {progressPercentage.toFixed(1)}% complete
+                      </span>
+                    </div>
+                  )}
                   
                   <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
                     <div

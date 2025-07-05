@@ -80,14 +80,6 @@ export const LandingPage: React.FC = () => {
       href: '/summary',
       color: 'bg-amber-500',
       hoverColor: 'hover:bg-amber-600'
-    },
-    {
-      icon: Database,
-      title: 'Data Manager',
-      description: 'Manage your financial data and test the app with sample transactions',
-      href: '/data',
-      color: 'bg-slate-500',
-      hoverColor: 'hover:bg-slate-600'
     }
   ];
 
