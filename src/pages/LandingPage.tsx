@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Auth } from '../components/Auth';
 import { 
@@ -18,12 +18,13 @@ import {
 
 export const LandingPage: React.FC = () => {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const handleStartChatting = () => {
     if (user) {
-      // User is logged in, navigate to chat
-      window.location.href = '/chat';
+      // User is logged in, navigate to chat using React Router
+      navigate('/chat');
     } else {
       // User is not logged in, show auth modal
       setShowAuthModal(true);
