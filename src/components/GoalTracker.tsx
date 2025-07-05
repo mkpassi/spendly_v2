@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Target, TrendingUp, Plus, X, UserX } from 'lucide-react';
+import { Target, TrendingUp, Plus, X, UserX, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrency } from '../contexts/CurrencyContext';
@@ -26,6 +26,7 @@ export const GoalTracker: React.FC = () => {
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [hasConnectionError, setHasConnectionError] = useState(false);
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+
   const [newGoal, setNewGoal] = useState({
     title: '',
     target_amount: '',
@@ -46,7 +47,7 @@ export const GoalTracker: React.FC = () => {
       supabase.removeChannel(realtimeChannelRef.current);
     }
 
-    // Create new subscription for both transactions and goals
+    // Create new subscription for transactions, goals, and goal_allocations
     const channel = supabase
       .channel(`goal-updates:user_id=eq.${user.id}`)
       .on(
@@ -87,6 +88,25 @@ export const GoalTracker: React.FC = () => {
           loadGoals();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'goal_allocations',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('🎯 GoalTracker: Real-time goal allocation update received:', payload);
+          
+          // Show notification for real-time updates
+          setShowUpdateNotification(true);
+          setTimeout(() => setShowUpdateNotification(false), 3000);
+          
+          // Reload goals when goal allocations change (this triggers goal progress updates)
+          loadGoals();
+        }
+      )
       .subscribe((status) => {
         console.log('🎯 GoalTracker: Real-time subscription status:', status);
       });
@@ -121,17 +141,58 @@ export const GoalTracker: React.FC = () => {
     setHasConnectionError(false);
     
     try {
-      // Use the new goal_progress_summary view for better performance
-      const { data, error } = await supabase
-        .from('goal_progress_summary')
+      console.log('🎯 GoalTracker: Loading goals for user:', user.id);
+      
+      // First, get all goals
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('goals')
         .select('*')
         .eq('user_id', user.id)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (goalsError) throw goalsError;
 
-      setGoals(data || []);
+      console.log('🎯 GoalTracker: Found goals:', goalsData?.length || 0);
+
+      // Then, get all goal allocations for these goals
+      const goalIds = goalsData?.map(g => g.id) || [];
+      let goalsWithCalculatedAmounts = goalsData || [];
+
+      if (goalIds.length > 0) {
+        const { data: allocationsData, error: allocationsError } = await supabase
+          .from('goal_allocations')
+          .select('goal_id, amount')
+          .in('goal_id', goalIds);
+
+        if (allocationsError) {
+          console.error('🎯 GoalTracker: Error loading allocations:', allocationsError);
+        } else {
+          console.log('🎯 GoalTracker: Found allocations:', allocationsData?.length || 0);
+          
+          // Calculate allocated amounts per goal
+          const allocationsByGoal = (allocationsData || []).reduce((acc: any, allocation) => {
+            if (!acc[allocation.goal_id]) {
+              acc[allocation.goal_id] = 0;
+            }
+            acc[allocation.goal_id] += allocation.amount || 0;
+            return acc;
+          }, {});
+
+          console.log('🎯 GoalTracker: Allocations by goal:', allocationsByGoal);
+
+          // Update goals with calculated amounts
+          goalsWithCalculatedAmounts = goalsData.map(goal => ({
+            ...goal,
+            allocated_amount: allocationsByGoal[goal.id] || 0
+          }));
+          
+
+        }
+      }
+
+      console.log('🎯 GoalTracker: Final goals with amounts:', goalsWithCalculatedAmounts);
+      setGoals(goalsWithCalculatedAmounts);
       setHasConnectionError(false);
     } catch (error) {
       console.error('Error loading goals:', error);
@@ -233,14 +294,24 @@ export const GoalTracker: React.FC = () => {
             <Target className="h-5 w-5 text-slate-600" />
             <h2 className="text-lg font-semibold text-slate-800">Savings Goals</h2>
           </div>
-          <button
-            onClick={() => setShowAddGoal(true)}
-            disabled={!user}
-            className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="text-sm">Add Goal</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadGoals}
+              disabled={!user || isLoading}
+              className="flex items-center gap-2 px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <span className="text-sm">Refresh</span>
+            </button>
+            <button
+              onClick={() => setShowAddGoal(true)}
+              disabled={!user}
+              className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="text-sm">Add Goal</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -309,6 +380,8 @@ export const GoalTracker: React.FC = () => {
           </form>
         </div>
       )}
+
+
 
       {/* Goals List */}
       <div className="p-6">
