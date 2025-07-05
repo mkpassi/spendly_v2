@@ -32,54 +32,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
   const [showSummary, setShowSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastGenerated, setLastGenerated] = useState<Date | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
   const loadingRef = useRef(false);
-
-  // Test function for debugging
-  const testMonthlySummary = async () => {
-    if (!user) return;
-    
-    console.log('🧪 MonthlySummary: Testing monthly summary function...');
-    setShowDebug(true);
-    
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.error('🧪 No session found for testing');
-        return;
-      }
-
-      console.log('🧪 Testing monthly summary with direct call...');
-      const testRequestBody = {
-        month: new Date().getMonth() + 1,
-        year: new Date().getFullYear(),
-        userId: user.id
-      };
-      
-      console.log('🧪 Test request body:', testRequestBody);
-      
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const functionUrl = `${supabaseUrl}/functions/v1/monthly-summary`;
-      
-      const response = await fetch(functionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify(testRequestBody),
-      });
-      
-      console.log('🧪 Test response status:', response.status);
-      const result = await response.json();
-      console.log('🧪 Test response data:', result);
-      
-    } catch (err) {
-      console.error('🧪 Monthly summary test failed:', err);
-    }
-  };
 
   const generateSummary = async () => {
     if (!user || loadingRef.current) return;
@@ -199,13 +152,6 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Debug Button */}
-            <button
-              onClick={() => setShowDebug(!showDebug)}
-              className="px-2 py-1 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition-colors"
-            >
-              🔧 Debug
-            </button>
             <button
               onClick={generateSummary}
               disabled={isLoading || !user}
@@ -222,33 +168,6 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({ userId }) => {
             </button>
           </div>
         </div>
-        
-        {/* Debug Panel */}
-        {showDebug && (
-          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-            <h4 className="text-sm font-semibold text-gray-800 mb-2">Debug Panel</h4>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={testMonthlySummary}
-                className="px-3 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600 transition-colors"
-              >
-                🧪 Test Monthly Summary
-              </button>
-              <button
-                onClick={() => console.log('User:', user)}
-                className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
-              >
-                👤 Log User Info
-              </button>
-              <button
-                onClick={() => console.log('Summary Data:', summaryData)}
-                className="px-3 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 transition-colors"
-              >
-                📊 Log Summary Data
-              </button>
-            </div>
-          </div>
-        )}
         
         {lastGenerated && (
           <div className="mt-2 text-xs text-slate-500">
