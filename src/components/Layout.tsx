@@ -73,7 +73,6 @@ export const LayoutComponent: React.FC<LayoutProps> = ({
     { name: 'Transactions', href: '/transactions', icon: List },
     { name: 'Goals', href: '/goals', icon: Target },
     { name: 'Summary', href: '/summary', icon: BarChart3 },
-    { name: 'Data', href: '/data', icon: Database },
   ];
 
   const breadcrumbs = getBreadcrumbs();
