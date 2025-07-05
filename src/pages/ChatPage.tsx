@@ -9,7 +9,7 @@ export const ChatPage: React.FC = () => {
   };
 
   return (
-    <div>
+    <div className="h-[calc(100vh-200px)]">
       <div className="h-full bg-white rounded-lg shadow-md overflow-hidden flex flex-col">
         <ChatInterface onTransactionAdded={handleTransactionAdded} />
       </div>
