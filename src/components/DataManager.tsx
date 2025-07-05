@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Database, Trash2, Plus, RefreshCw, BarChart3, Target, DollarSign, MessageCircle } from 'lucide-react';
+import { Database, Trash2, Plus, RefreshCw, BarChart3, Target, MessageCircle } from 'lucide-react';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { insertDummyData, clearAllData } from '../utils/dummyData';
 
 interface DataManagerProps {
@@ -7,6 +8,7 @@ interface DataManagerProps {
 }
 
 export const DataManager: React.FC<DataManagerProps> = ({ onDataChange }) => {
+  const { currencySymbol } = useCurrency();
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -125,7 +127,7 @@ export const DataManager: React.FC<DataManagerProps> = ({ onDataChange }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
-              <DollarSign className="h-5 w-5 text-blue-600" />
+              <span className="text-lg font-semibold text-blue-600">{currencySymbol}</span>
               <h3 className="font-semibold text-blue-900">Transactions</h3>
             </div>
             <p className="text-sm text-blue-800">40 realistic transactions</p>
@@ -167,12 +169,12 @@ export const DataManager: React.FC<DataManagerProps> = ({ onDataChange }) => {
             <div>
               <h4 className="font-medium text-blue-800 mb-2">💰 Transactions (40 items)</h4>
               <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Monthly salary: $4,200</li>
-                <li>• Freelance income: $850</li>
-                <li>• Bonuses: $1,750 total</li>
-                <li>• Rent: $1,850/month</li>
-                <li>• Groceries: $200-400/month</li>
-                <li>• Dining: $300-500/month</li>
+                <li>• Monthly salary: {currencySymbol}4,200</li>
+                <li>• Freelance income: {currencySymbol}850</li>
+                <li>• Bonuses: {currencySymbol}1,750 total</li>
+                <li>• Rent: {currencySymbol}1,850/month</li>
+                <li>• Groceries: {currencySymbol}200-400/month</li>
+                <li>• Dining: {currencySymbol}300-500/month</li>
                 <li>• Utilities, transport, entertainment</li>
                 <li>• Mix of daily and monthly expenses</li>
               </ul>
@@ -180,11 +182,11 @@ export const DataManager: React.FC<DataManagerProps> = ({ onDataChange }) => {
             <div>
               <h4 className="font-medium text-blue-800 mb-2">🎯 Goals & Chat</h4>
               <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Emergency Fund: $15,000 target</li>
-                <li>• MacBook Pro: $2,500 target</li>
-                <li>• Japan Vacation: $4,500 target</li>
-                <li>• Home Down Payment: $50,000</li>
-                <li>• New Car Fund: $8,000</li>
+                <li>• Emergency Fund: {currencySymbol}15,000 target</li>
+                <li>• MacBook Pro: {currencySymbol}2,500 target</li>
+                <li>• Japan Vacation: {currencySymbol}4,500 target</li>
+                <li>• Home Down Payment: {currencySymbol}50,000</li>
+                <li>• New Car Fund: {currencySymbol}8,000</li>
                 <li>• Realistic chat conversation</li>
                 <li>• Goal setting & progress updates</li>
                 <li>• Financial coaching dialogue</li>

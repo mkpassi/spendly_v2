@@ -10,6 +10,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { ChatHistoryPage } from './pages/ChatHistoryPage';
 import SettingsPage from './pages/SettingsPage';
 import { AuthProvider } from './contexts/AuthContext';
+import { CurrencyProvider } from './contexts/CurrencyContext';
 import { Header } from './components/Header';
 import { AuthGuard } from './components/AuthGuard';
 import { Layout } from './components/Layout';
@@ -18,7 +19,8 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <div className="min-h-screen bg-slate-100 flex flex-col">
+        <CurrencyProvider>
+          <div className="min-h-screen bg-slate-100 flex flex-col">
           <Header />
           <main className="flex-1 flex flex-col">
             <Routes>
@@ -79,7 +81,8 @@ function App() {
               } />
             </Routes>
           </main>
-        </div>
+          </div>
+        </CurrencyProvider>
       </AuthProvider>
     </Router>
   );

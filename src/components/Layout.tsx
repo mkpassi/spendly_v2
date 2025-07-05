@@ -51,6 +51,9 @@ export const LayoutComponent: React.FC<LayoutProps> = ({
       case '/summary':
         breadcrumbs.push({ name: 'Summary', href: '/summary', icon: BarChart3 });
         break;
+      case '/data':
+        breadcrumbs.push({ name: 'Data', href: '/data', icon: Database });
+        break;
       case '/profile':
         breadcrumbs.push({ name: 'Profile', href: '/profile', icon: User });
         break;
@@ -67,12 +70,10 @@ export const LayoutComponent: React.FC<LayoutProps> = ({
 
   const navigationItems = [
     { name: 'AI Chat', href: '/chat', icon: MessageCircle },
-    { name: 'Chat History', href: '/chat-history', icon: History },
     { name: 'Transactions', href: '/transactions', icon: List },
     { name: 'Goals', href: '/goals', icon: Target },
     { name: 'Summary', href: '/summary', icon: BarChart3 },
-    { name: 'Settings', href: '/settings', icon: Settings },
-    { name: 'Profile', href: '/profile', icon: User },
+    { name: 'Data', href: '/data', icon: Database },
   ];
 
   const breadcrumbs = getBreadcrumbs();

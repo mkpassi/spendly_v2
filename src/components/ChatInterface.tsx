@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, MessageCircle, Loader2, Trash2, Bot, BarChart3 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 
 interface ChatMessage {
   id: string;
@@ -18,6 +19,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onTransactionAdded 
 }) => {
   const { user, loading: authLoading } = useAuth();
+  const { currencySymbol } = useCurrency();
   const userId = user?.id;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -114,7 +116,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         // Add welcome message if no chat history
         const welcomeMessage = {
           id: 'welcome',
-          message: "Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for $75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!",
+          message: `Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for ${currencySymbol}75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!`,
           sender: 'ai' as const,
           created_at: new Date().toISOString()
         };
@@ -206,15 +208,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const lowerMessage = message.toLowerCase();
     
     if (lowerMessage.includes('help') || lowerMessage.includes('how')) {
-      return "I'm here to help you track your finances! 💰\n\nYou can:\n• Tell me about transactions (e.g., 'Bought coffee for $5')\n• Ask about your spending patterns\n• Set savings goals\n• Get monthly summaries\n\n💡 Try the 'Data' tab to add sample data for testing!";
+      return `I'm here to help you track your finances! 💰\n\nYou can:\n• Tell me about transactions (e.g., 'Bought coffee for ${currencySymbol}5')\n• Ask about your spending patterns\n• Set savings goals\n• Get monthly summaries\n\n💡 Try the 'Data' tab to add sample data for testing!`;
     }
     
     if (lowerMessage.includes('goal') || lowerMessage.includes('save')) {
-      return "Great thinking about savings goals! 🎯\n\nYou can set goals by telling me things like:\n• 'I want to save $500 for a new phone'\n• 'Help me save $1000 by June'\n\nCheck out the 'Goals' tab to see your progress!";
+      return `Great thinking about savings goals! 🎯\n\nYou can set goals by telling me things like:\n• 'I want to save ${currencySymbol}500 for a new phone'\n• 'Help me save ${currencySymbol}1000 by June'\n\nCheck out the 'Goals' tab to see your progress!`;
     }
     
     if (lowerMessage.includes('spending') || lowerMessage.includes('expense')) {
-      return "I'd love to help you analyze your spending! 📊\n\nTry the 'Summary' tab for insights, or tell me about specific expenses like:\n• 'Spent $50 on groceries'\n• 'Paid $25 for gas'\n\nI'll help you track everything!";
+      return `I'd love to help you analyze your spending! 📊\n\nTry the 'Summary' tab for insights, or tell me about specific expenses like:\n• 'Spent ${currencySymbol}50 on groceries'\n• 'Paid ${currencySymbol}25 for gas'\n\nI'll help you track everything!`;
     }
     
     return "I'm having trouble right now, but I'm still here to help! 😊\n\nI can help you track expenses, set savings goals, and analyze your spending patterns.\n\n💡 Note: Full AI features require OpenAI API configuration. Try the 'Data' tab to add sample transactions for testing!";
@@ -304,7 +306,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       // Clear from UI and show welcome message
       const welcomeMessage = {
         id: 'welcome',
-        message: "Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for $75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!",
+        message: `Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for ${currencySymbol}75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!`,
         sender: 'ai' as const,
         created_at: new Date().toISOString()
       };
@@ -385,8 +387,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <div className="bg-blue-50 rounded-lg p-4 text-sm text-slate-700">
                   <p className="font-medium mb-2">💡 Try asking:</p>
                   <ul className="text-left space-y-1">
-                    <li>• "I spent $50 on groceries"</li>
-                    <li>• "I want to save $1000 for vacation"</li>
+                    <li>• "I spent {currencySymbol}50 on groceries"</li>
+                    <li>• "I want to save {currencySymbol}1000 for vacation"</li>
                     <li>• "Show me my spending summary"</li>
                   </ul>
                 </div>

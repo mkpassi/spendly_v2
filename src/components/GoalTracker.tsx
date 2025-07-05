@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Target, TrendingUp, Plus, X, UserX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { formatCurrency } from '../utils/currencyUtils';
 
 interface Goal {
   id: string;
@@ -18,6 +20,7 @@ interface Goal {
 
 export const GoalTracker: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
+  const { currency } = useCurrency();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddGoal, setShowAddGoal] = useState(false);
@@ -190,11 +193,8 @@ export const GoalTracker: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+  const formatCurrencyWithSymbol = (amount: number) => {
+    return formatCurrency(amount, currency);
   };
 
   const formatDate = (dateString: string) => {
@@ -346,10 +346,10 @@ export const GoalTracker: React.FC = () => {
                   
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-slate-600">
-                      {formatCurrency(goal.allocated_amount)}
+                      {formatCurrencyWithSymbol(goal.allocated_amount)}
                     </span>
                     <span className="text-sm text-slate-500">
-                      of {formatCurrency(goal.target_amount)}
+                      of {formatCurrencyWithSymbol(goal.target_amount)}
                     </span>
                   </div>
                   

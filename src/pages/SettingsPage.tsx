@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { supabase } from '../lib/supabase';
+import { SUPPORTED_CURRENCIES } from '../utils/currencyUtils';
 import { 
   Cog6ToothIcon, 
   CurrencyDollarIcon, 
   ChartPieIcon, 
   ExclamationTriangleIcon,
   CheckCircleIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  GlobeAltIcon
 } from '@heroicons/react/24/outline';
 
 interface BudgetSettings {
@@ -27,6 +30,7 @@ interface Goal {
 
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { currency, currencySymbol, setCurrency, loading: currencyLoading, error: currencyError } = useCurrency();
   const [settings, setSettings] = useState<BudgetSettings>({
     expenses_percentage: 50,
     savings_percentage: 30,
@@ -35,6 +39,7 @@ export default function SettingsPage() {
   const [activeGoals, setActiveGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingCurrency, setSavingCurrency] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
 
   useEffect(() => {
@@ -147,6 +152,24 @@ export default function SettingsPage() {
     setMessage(null);
   };
 
+  const handleCurrencyChange = async (newCurrency: string) => {
+    setSavingCurrency(true);
+    setMessage(null);
+    
+    try {
+      await setCurrency(newCurrency);
+      setMessage({ type: 'success', text: `Currency updated to ${newCurrency}. New transactions will use this currency.` });
+      
+      // Auto-hide success message after 3 seconds
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error) {
+      console.error('Error updating currency:', error);
+      setMessage({ type: 'error', text: 'Failed to update currency preference' });
+    } finally {
+      setSavingCurrency(false);
+    }
+  };
+
   const getPercentageColor = (percentage: number) => {
     if (percentage >= 60) return 'text-red-600';
     if (percentage >= 40) return 'text-yellow-600';
@@ -205,6 +228,39 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Budget Allocation Settings */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Currency Settings */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                <GlobeAltIcon className="h-6 w-6 text-blue-600 mr-2" />
+                Currency Settings
+              </h2>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preferred Currency
+                  </label>
+                  <select
+                    value={currency}
+                    onChange={(e) => handleCurrencyChange(e.target.value)}
+                    disabled={currencyLoading || savingCurrency}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {SUPPORTED_CURRENCIES.map((curr) => (
+                      <option key={curr.code} value={curr.code}>
+                        {curr.flag} {curr.name} ({curr.symbol})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-sm text-gray-600 mt-2">
+                    {savingCurrency ? 'Updating currency...' : 'New transactions will use this currency. Existing transactions will keep their original currency.'}
+                  </p>
+                  {currencyError && (
+                    <p className="text-sm text-red-600 mt-1">{currencyError}</p>
+                  )}
+                </div>
+              </div>
+            </div>
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
                 <ChartPieIcon className="h-6 w-6 text-blue-600 mr-2" />
@@ -363,7 +419,7 @@ export default function SettingsPage() {
                       <div className="text-sm text-gray-600">
                         <div className="flex justify-between">
                           <span>Progress:</span>
-                          <span>${goal.allocated_amount.toFixed(2)} / ${goal.target_amount.toFixed(2)}</span>
+                          <span>{currencySymbol}{goal.allocated_amount.toFixed(2)} / {currencySymbol}{goal.target_amount.toFixed(2)}</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                           <div 
@@ -392,7 +448,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-start space-x-2">
                   <span className="font-medium">3.</span>
-                  <span>You can override with specific amounts like "save $200 for vacation".</span>
+                  <span>You can override with specific amounts like "save {currencySymbol}200 for vacation".</span>
                 </div>
                 <div className="flex items-start space-x-2">
                   <span className="font-medium">4.</span>

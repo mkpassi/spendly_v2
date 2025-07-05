@@ -297,22 +297,32 @@ serve(async (req) => {
     // Get user settings and active goals
     console.log("📊 Fetching user settings and goals...");
     const [settingsResult, goalsResult] = await Promise.all([
-      supabaseAdmin.from('user_settings').select('*').eq('user_id', userId).single(),
+      supabaseAdmin.rpc('get_user_budget_settings', { user_id_param: userId }),
       supabaseAdmin.from('goals').select('*').eq('user_id', userId).eq('is_active', true)
     ]);
 
     console.log("📊 Settings result:", settingsResult);
     console.log("🎯 Goals result:", goalsResult);
 
-    const settings = settingsResult.data || { 
+    const settingsData = settingsResult.data?.[0] || { 
       expenses_percentage: 50, 
       savings_percentage: 30, 
-      goals_percentage: 20 
+      goals_percentage: 20,
+      currency: 'INR',
+      currency_symbol: '₹'
+    };
+    
+    const settings = {
+      expenses_percentage: settingsData.expenses_percentage,
+      savings_percentage: settingsData.savings_percentage,
+      goals_percentage: settingsData.goals_percentage,
+      currency: settingsData.currency,
+      currency_symbol: settingsData.currency_symbol
     };
     
     const activeGoals = goalsResult.data || [];
     const activeGoalsList = activeGoals.length > 0 
-      ? activeGoals.map(g => `${g.title} ($${g.allocated_amount}/$${g.target_amount})`).join(', ')
+      ? activeGoals.map(g => `${g.title} (${settings.currency_symbol}${g.allocated_amount}/${settings.currency_symbol}${g.target_amount})`).join(', ')
       : 'None';
 
     console.log("📊 Final settings:", settings);
@@ -335,43 +345,44 @@ serve(async (req) => {
 CONTEXT:
 - Budget: ${settings.expenses_percentage}% expenses, ${settings.savings_percentage}% savings, ${settings.goals_percentage}% goals
 - Active goals: ${activeGoalsList}
+- User currency: ${settings.currency} (${settings.currency_symbol})
 - Today's date: ${new Date().toISOString().split('T')[0]}
 
 GOAL DETECTION CRITERIA:
 A message should be classified as a GOAL if it contains:
 1. FUTURE-ORIENTED SAVING INTENT: "want to save", "planning to save", "saving for", "goal to save"
-2. SPECIFIC TARGET AMOUNT: "$5000", "five thousand dollars", "10k", etc.
+2. SPECIFIC TARGET AMOUNT: "${settings.currency_symbol}5000", "five thousand ${settings.currency}", "10k", "₹50000", "$5000", etc.
 3. SPECIFIC PURPOSE: "vacation", "car", "house", "emergency fund", "wedding", "laptop", etc.
 4. GOAL KEYWORDS: "goal", "target", "save up", "put aside", "build up to"
 5. TIMEFRAME INDICATORS: "by next year", "in 6 months", "for next summer"
 
 GOAL EXAMPLES:
-- "I want to save $5000 for vacation" → GOAL
-- "Planning to save $10000 for a new car" → GOAL  
-- "Create a goal to save $3000 for laptop" → GOAL
-- "I need to save up $15000 for house down payment" → GOAL
-- "Goal of $8000 for emergency fund" → GOAL
-- "Want to put aside $2000 for wedding" → GOAL
+- "I want to save ${settings.currency_symbol}5000 for vacation" → GOAL
+- "Planning to save ${settings.currency_symbol}10000 for a new car" → GOAL  
+- "Create a goal to save ${settings.currency_symbol}3000 for laptop" → GOAL
+- "I need to save up ${settings.currency_symbol}15000 for house down payment" → GOAL
+- "Goal of ${settings.currency_symbol}8000 for emergency fund" → GOAL
+- "Want to put aside ${settings.currency_symbol}2000 for wedding" → GOAL
 
 TRANSACTION DETECTION CRITERIA:
 A message should be classified as a TRANSACTION if it contains:
 1. PAST/PRESENT ACTIONS: "bought", "paid", "spent", "got paid", "received", "earned"
-2. SPECIFIC AMOUNT: "$50", "fifty dollars", etc.
+2. SPECIFIC AMOUNT: "${settings.currency_symbol}50", "fifty ${settings.currency}", "₹500", "$50", etc.
 3. SPECIFIC ITEM/SERVICE: "groceries", "gas", "salary", "dinner", "rent"
 4. TRANSACTION KEYWORDS: "purchase", "payment", "expense", "income", "cost"
 
 TRANSACTION EXAMPLES:
-- "Bought groceries for $85.50" → TRANSACTION
-- "Paid $45 for gas" → TRANSACTION
-- "Got paid $5000 salary" → TRANSACTION
-- "Spent $120 on dinner" → TRANSACTION
-- "Received $2000 bonus" → TRANSACTION
+- "Bought groceries for ${settings.currency_symbol}85.50" → TRANSACTION
+- "Paid ${settings.currency_symbol}45 for gas" → TRANSACTION
+- "Got paid ${settings.currency_symbol}5000 salary" → TRANSACTION
+- "Spent ${settings.currency_symbol}120 on dinner" → TRANSACTION
+- "Received ${settings.currency_symbol}2000 bonus" → TRANSACTION
 
 AMBIGUOUS CASES - DECISION LOGIC:
-- "Save $100 for groceries" → GOAL (future intent with specific purpose)
-- "Put $100 aside for groceries" → GOAL (saving behavior)
-- "Spent $100 on groceries" → TRANSACTION (past action)
-- "Need $100 for groceries" → CONVERSATION (no clear action)
+- "Save ${settings.currency_symbol}100 for groceries" → GOAL (future intent with specific purpose)
+- "Put ${settings.currency_symbol}100 aside for groceries" → GOAL (saving behavior)
+- "Spent ${settings.currency_symbol}100 on groceries" → TRANSACTION (past action)
+- "Need ${settings.currency_symbol}100 for groceries" → CONVERSATION (no clear action)
 
 MANDATORY JSON STRUCTURE:
 {
@@ -393,21 +404,21 @@ MANDATORY JSON STRUCTURE:
 
 EXAMPLES WITH DETAILED ANALYSIS:
 
-Input: "I want to save $5000 for vacation next summer"
-Analysis: Future intent (want to save) + Target amount ($5000) + Specific purpose (vacation) + Timeframe (next summer) = GOAL
-Output: {"actions":[{"type":"goal","title":"Vacation","target_amount":5000,"percentage_allocation":20}],"response":"Excellent! 🎯 I've created your vacation goal of $5,000. This goal will automatically receive 20% of your income. Start planning that amazing trip! ✈️"}
+Input: "I want to save ${settings.currency_symbol}5000 for vacation next summer"
+Analysis: Future intent (want to save) + Target amount (${settings.currency_symbol}5000) + Specific purpose (vacation) + Timeframe (next summer) = GOAL
+Output: {"actions":[{"type":"goal","title":"Vacation","target_amount":5000,"percentage_allocation":20}],"response":"Excellent! 🎯 I've created your vacation goal of ${settings.currency_symbol}5,000. This goal will automatically receive 20% of your income. Start planning that amazing trip! ✈️"}
 
-Input: "Bought groceries for $85.50 at Whole Foods"
-Analysis: Past action (bought) + Specific amount ($85.50) + Specific item (groceries) = TRANSACTION
-Output: {"actions":[{"type":"transaction","description":"Groceries at Whole Foods","amount":85.50,"category":"Groceries","transaction_type":"expense","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Got it! 🛒 I've recorded your $85.50 grocery expense. Every dollar tracked brings you closer to your financial goals! 💪"}
+Input: "Bought groceries for ${settings.currency_symbol}85.50 at Whole Foods"
+Analysis: Past action (bought) + Specific amount (${settings.currency_symbol}85.50) + Specific item (groceries) = TRANSACTION
+Output: {"actions":[{"type":"transaction","description":"Groceries at Whole Foods","amount":85.50,"category":"Groceries","transaction_type":"expense","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Got it! 🛒 I've recorded your ${settings.currency_symbol}85.50 grocery expense. Every ${settings.currency} tracked brings you closer to your financial goals! 💪"}
 
-Input: "Got paid $5000 salary"
-Analysis: Past action (got paid) + Specific amount ($5000) + Income type (salary) = TRANSACTION
-Output: {"actions":[{"type":"transaction","description":"Salary Payment","amount":5000,"category":"Salary","transaction_type":"income","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Congratulations on your $5,000 salary! 🎉 I've recorded it and it will be auto-allocated based on your budget settings. Your financial discipline is paying off! 💰"}
+Input: "Got paid ${settings.currency_symbol}5000 salary"
+Analysis: Past action (got paid) + Specific amount (${settings.currency_symbol}5000) + Income type (salary) = TRANSACTION
+Output: {"actions":[{"type":"transaction","description":"Salary Payment","amount":5000,"category":"Salary","transaction_type":"income","date":"${new Date().toISOString().split('T')[0]}"}],"response":"Congratulations on your ${settings.currency_symbol}5,000 salary! 🎉 I've recorded it and it will be auto-allocated based on your budget settings. Your financial discipline is paying off! 💰"}
 
-Input: "Create a goal to save $10000 for emergency fund"
-Analysis: Goal creation intent (create a goal) + Future saving (to save) + Target amount ($10000) + Specific purpose (emergency fund) = GOAL
-Output: {"actions":[{"type":"goal","title":"Emergency Fund","target_amount":10000,"percentage_allocation":20}],"response":"Smart financial planning! 🛡️ I've created your Emergency Fund goal of $10,000. This safety net will give you peace of mind and financial security! 💪"}
+Input: "Create a goal to save ${settings.currency_symbol}10000 for emergency fund"
+Analysis: Goal creation intent (create a goal) + Future saving (to save) + Target amount (${settings.currency_symbol}10000) + Specific purpose (emergency fund) = GOAL
+Output: {"actions":[{"type":"goal","title":"Emergency Fund","target_amount":10000,"percentage_allocation":20}],"response":"Smart financial planning! 🛡️ I've created your Emergency Fund goal of ${settings.currency_symbol}10,000. This safety net will give you peace of mind and financial security! 💪"}
 
 Input: "How much have I spent this month?"
 Analysis: Question about spending (no transaction or goal creation) = CONVERSATION
@@ -635,7 +646,7 @@ CRITICAL RULES:
               percentage_allocation: 20
             });
             
-            fallbackResponse = `Excellent! 🎯 I've created your goal to save $${amount.toLocaleString()} for ${title}. This goal will receive 20% of your income automatically. You're taking great steps toward your financial future! 💪`;
+            fallbackResponse = `Excellent! 🎯 I've created your goal to save ${settings.currency_symbol}${amount.toLocaleString()} for ${title}. This goal will receive 20% of your income automatically. You're taking great steps toward your financial future! 💪`;
             
             console.log("✅ Manual goal parsing successful:", fallbackActions[0]);
             break;
@@ -697,8 +708,8 @@ CRITICAL RULES:
               });
               
               fallbackResponse = isIncome 
-                ? `Great! 💰 I've recorded your $${amount} ${description}. This income will be auto-allocated based on your budget settings!`
-                : `Got it! 📝 I've recorded your $${amount} expense for ${description}. Keep tracking your spending!`;
+                ? `Great! 💰 I've recorded your ${settings.currency_symbol}${amount} ${description}. This income will be auto-allocated based on your budget settings!`
+                : `Got it! 📝 I've recorded your ${settings.currency_symbol}${amount} expense for ${description}. Keep tracking your spending!`;
               
               console.log("✅ Manual parsing successful:", fallbackActions[0]);
               break;
@@ -709,7 +720,7 @@ CRITICAL RULES:
       
       if (fallbackActions.length === 0) {
         console.log("❌ Manual parsing failed - no transaction patterns found");
-        fallbackResponse = "I had trouble understanding that transaction. Could you try rephrasing it? For example: 'Bought groceries for $50' or 'Got paid $2000 salary'";
+        fallbackResponse = `I had trouble understanding that transaction. Could you try rephrasing it? For example: 'Bought groceries for ${settings.currency_symbol}50' or 'Got paid ${settings.currency_symbol}2000 salary'`;
       }
     }
     
