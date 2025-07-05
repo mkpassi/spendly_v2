@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Layout } from '../components/Layout';
 import { ChatInterface } from '../components/ChatInterface';
 
 export const ChatPage: React.FC = () => {
@@ -10,13 +9,10 @@ export const ChatPage: React.FC = () => {
   };
 
   return (
-    <Layout 
-      title="AI Financial Coach" 
-      description="Chat with your personal AI assistant to track expenses and get financial insights"
-    >
-      <div className="h-[calc(100vh-280px)]">
+    <div>
+      <div className="h-full bg-white rounded-lg shadow-md overflow-hidden flex flex-col">
         <ChatInterface onTransactionAdded={handleTransactionAdded} />
       </div>
-    </Layout>
+    </div>
   );
 };

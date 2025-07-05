@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Target, TrendingUp, Plus, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Target, TrendingUp, Plus, X, UserX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Goal {
   id: string;
@@ -12,32 +13,41 @@ interface Goal {
   created_at: string;
 }
 
-interface GoalTrackerProps {
-  userId?: string;
-}
-
-export const GoalTracker: React.FC<GoalTrackerProps> = ({ 
-  userId = 'anonymous_user' 
-}) => {
+export const GoalTracker: React.FC = () => {
+  const { user, loading: authLoading } = useAuth();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddGoal, setShowAddGoal] = useState(false);
+  const [hasConnectionError, setHasConnectionError] = useState(false);
   const [newGoal, setNewGoal] = useState({
     title: '',
     target_amount: '',
     target_date: ''
   });
+  const loadingRef = useRef(false);
 
   useEffect(() => {
-    loadGoals();
-  }, [userId]);
+    if (user && !loadingRef.current) {
+      loadGoals();
+    } else if (!authLoading) {
+      setIsLoading(false);
+      setGoals([]);
+      setHasConnectionError(false);
+    }
+  }, [user, authLoading]);
 
   const loadGoals = async () => {
+    if (!user || loadingRef.current) return;
+    
+    loadingRef.current = true;
+    setIsLoading(true);
+    setHasConnectionError(false);
+    
     try {
       const { data, error } = await supabase
         .from('goals')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', user.id)
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
@@ -55,20 +65,24 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
       );
 
       setGoals(goalsWithProgress);
+      setHasConnectionError(false);
     } catch (error) {
       console.error('Error loading goals:', error);
+      setHasConnectionError(true);
     } finally {
       setIsLoading(false);
+      loadingRef.current = false;
     }
   };
 
   const calculateGoalProgress = async (goalId: string, goalCreatedAt: string) => {
+    if (!user) return 0;
     try {
       // Get transactions since goal was created
       const { data: transactions, error } = await supabase
         .from('transactions')
         .select('amount, type')
-        .eq('user_id', userId)
+        .eq('user_id', user.id)
         .gte('created_at', goalCreatedAt);
 
       if (error) throw error;
@@ -94,13 +108,13 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
   const handleAddGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!newGoal.title || !newGoal.target_amount) return;
+    if (!newGoal.title || !newGoal.target_amount || !user) return;
 
     try {
       const { data, error } = await supabase
         .from('goals')
         .insert({
-          user_id: userId,
+          user_id: user.id,
           title: newGoal.title,
           target_amount: parseFloat(newGoal.target_amount),
           target_date: newGoal.target_date || null,
@@ -146,10 +160,11 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
   };
 
   const getProgressPercentage = (current: number, target: number) => {
+    if (target === 0) return 0;
     return Math.min(100, Math.max(0, (current / target) * 100));
   };
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="animate-pulse">
@@ -171,7 +186,8 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
           </div>
           <button
             onClick={() => setShowAddGoal(true)}
-            className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+            disabled={!user}
+            className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
             <Plus className="h-4 w-4" />
             <span className="text-sm">Add Goal</span>
@@ -247,14 +263,20 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
 
       {/* Goals List */}
       <div className="p-6">
-        {goals.length === 0 ? (
-          <div className="text-center py-8 text-slate-500">
+        {!user ? (
+          <div className="text-center text-slate-500 py-8">
+            <UserX className="h-12 w-12 mx-auto mb-4 text-slate-300" />
+            <p className="font-semibold">Please log in</p>
+            <p className="text-sm">Sign in to track your savings goals.</p>
+          </div>
+        ) : goals.length === 0 ? (
+          <div className="text-center text-slate-500 py-8">
             <Target className="h-12 w-12 mx-auto mb-4 text-slate-300" />
-            <p>No savings goals yet.</p>
-            <p className="text-sm">Add your first goal to start tracking progress!</p>
+            <p className="font-semibold">No active goals yet.</p>
+            <p className="text-sm">Click "Add Goal" to get started!</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {goals.map((goal) => {
               const progressPercentage = getProgressPercentage(goal.current_amount, goal.target_amount);
               const isComplete = progressPercentage >= 100;
@@ -275,10 +297,10 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
                   
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-slate-600">
-                      {formatCurrency(goal.current_amount)} of {formatCurrency(goal.target_amount)}
+                      {formatCurrency(goal.current_amount)}
                     </span>
-                    <span className="text-sm font-medium text-slate-700">
-                      {progressPercentage.toFixed(0)}%
+                    <span className="text-sm text-slate-500">
+                      of {formatCurrency(goal.target_amount)}
                     </span>
                   </div>
                   
@@ -293,10 +315,12 @@ export const GoalTracker: React.FC<GoalTrackerProps> = ({
                   
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-slate-600">
-                        {formatCurrency(goal.target_amount - goal.current_amount)} to go
-                      </span>
+                      <button
+                        onClick={() => handleCompleteGoal(goal.id)}
+                        className="p-2 text-slate-400 hover:text-green-500 transition-colors"
+                      >
+                        <TrendingUp className="h-4 w-4" />
+                      </button>
                     </div>
                     
                     {goal.target_date && (

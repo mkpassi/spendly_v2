@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Layout } from '../components/Layout';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { 
   User, 
   Camera, 
@@ -12,87 +13,295 @@ import {
   CreditCard,
   Download,
   Trash2,
-  Edit3
+  Edit3,
+  Loader2,
+  UserX
 } from 'lucide-react';
 
-// Mock user data - in a real app this would come from authentication
-const initialUserData = {
-  id: 'user_123',
-  name: 'Alex Johnson',
-  email: 'alex.johnson@example.com',
-  avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&dpr=2',
-  joinedDate: '2024-01-15',
-  phone: '+1 (555) 123-4567',
-  location: 'San Francisco, CA',
-  timezone: 'Pacific Time (PT)',
-  currency: 'USD',
-  language: 'English',
-  notifications: {
-    email: true,
-    push: true,
-    sms: false,
-    goalReminders: true,
-    monthlyReports: true
-  },
-  privacy: {
-    profileVisible: true,
-    dataSharing: false,
-    analytics: true
-  }
-};
-
 export const ProfilePage: React.FC = () => {
-  const [userData, setUserData] = useState(initialUserData);
+  const { user, userProfile, loading: authLoading, refreshUserProfile } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'preferences' | 'privacy' | 'data'>('profile');
   const [isSaving, setIsSaving] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  // Fallback user display data
+  const getUserDisplayName = () => {
+    if (fullName) {
+      return fullName;
+    }
+    if (user?.user_metadata?.full_name) {
+      return user.user_metadata.full_name;
+    }
+    if (user?.email) {
+      // Extract name from email (before @)
+      const emailName = user.email.split('@')[0];
+      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
+    }
+    return 'User';
+  };
+
+  const getUserAvatarUrl = () => {
+    console.log('🔍 ProfilePage: getUserAvatarUrl called');
+    console.log('📄 ProfilePage: Current avatarUrl state:', avatarUrl);
+    console.log('📄 ProfilePage: userProfile?.avatar_url:', userProfile?.avatar_url);
+    console.log('🏷️ ProfilePage: user?.user_metadata?.avatar_url:', user?.user_metadata?.avatar_url);
+    
+    // First priority: Current state (for editing)
+    if (avatarUrl) {
+      console.log('🎯 ProfilePage: Using current state avatar:', avatarUrl);
+      return avatarUrl;
+    }
+    // Second priority: Database profile
+    if (userProfile?.avatar_url) {
+      console.log('🎯 ProfilePage: Using database avatar_url:', userProfile.avatar_url);
+      return userProfile.avatar_url;
+    }
+    // Third priority: Auth metadata
+    if (user?.user_metadata?.avatar_url) {
+      console.log('🎯 ProfilePage: Using auth metadata avatar_url:', user.user_metadata.avatar_url);
+      return user.user_metadata.avatar_url;
+    }
+    // Fourth priority: Generate avatar
+    const name = user?.email || 'User';
+    const generatedUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff&size=128`;
+    console.log('🎯 ProfilePage: Using generated avatar:', generatedUrl);
+    return generatedUrl;
+  };
+
+  useEffect(() => {
+    console.log('📄 ProfilePage: User data changed:', user);
+    console.log('📄 ProfilePage: User profile data:', userProfile);
+    console.log('🏷️ ProfilePage: User metadata (fallback):', user?.user_metadata);
+    console.log('📧 ProfilePage: User email:', user?.email);
+    console.log('🆔 ProfilePage: User ID:', user?.id);
+    
+    if (user) {
+      // Prioritize database profile over auth metadata
+      const fullNameFromProfile = userProfile?.full_name || user.user_metadata?.full_name || '';
+      const avatarFromProfile = userProfile?.avatar_url || user.user_metadata?.avatar_url || '';
+      
+      console.log('👤 ProfilePage: Setting full name (priority: db > auth):', fullNameFromProfile);
+      console.log('🖼️ ProfilePage: Setting avatar URL (priority: db > auth):', avatarFromProfile);
+      
+      setFullName(fullNameFromProfile);
+      setAvatarUrl(avatarFromProfile);
+    }
+  }, [user, userProfile]);
 
   const handleSave = async () => {
-    setIsSaving(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    setIsEditing(false);
-  };
-
-  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setUserData(prev => ({
-          ...prev,
-          avatar: e.target?.result as string
-        }));
-      };
-      reader.readAsDataURL(file);
+    if (!user) {
+      console.log('❌ ProfilePage: No user found, cannot save');
+      return;
     }
+
+    console.log('💾 ProfilePage: Starting save process...');
+    console.log('👤 ProfilePage: Current user ID:', user.id);
+    console.log('📝 ProfilePage: Full name to save:', fullName);
+    console.log('🔄 ProfilePage: Current user metadata before save:', user.user_metadata);
+
+    setIsSaving(true);
+    
+    try {
+      console.log('🚀 ProfilePage: Calling supabase.auth.updateUser...');
+      const { data, error } = await supabase.auth.updateUser({
+        data: { full_name: fullName }
+      });
+
+      console.log('📋 ProfilePage: Supabase updateUser response data:', data);
+      console.log('❗ ProfilePage: Supabase updateUser error:', error);
+
+      if (error) {
+        console.log('❌ ProfilePage: Error updating user auth data:', error.message);
+        alert('Error updating user data: ' + error.message);
+        return;
+      }
+
+      console.log('✅ ProfilePage: User auth data updated successfully');
+      console.log('👤 ProfilePage: Updated user data:', data.user);
+      console.log('🏷️ ProfilePage: Updated user metadata:', data.user?.user_metadata);
+
+      // Now save to database
+      console.log('💾 ProfilePage: Saving to users database table...');
+      const { data: dbData, error: dbError } = await supabase
+        .from('users')
+        .upsert({
+          id: user.id,
+          full_name: fullName,
+          email: user.email,
+          updated_at: new Date().toISOString()
+        })
+        .select();
+
+      console.log('📋 ProfilePage: Database upsert response data:', dbData);
+      console.log('❗ ProfilePage: Database upsert error:', dbError);
+
+      if (dbError) {
+        console.log('❌ ProfilePage: Error saving to database:', dbError.message);
+        alert('Profile saved to auth but failed to save to database: ' + dbError.message);
+      } else {
+        console.log('✅ ProfilePage: Successfully saved to database');
+        console.log('💾 ProfilePage: Database record:', dbData);
+      }
+      
+      // Verify the save by checking the current user
+      const { data: currentUserData, error: getUserError } = await supabase.auth.getUser();
+      console.log('🔍 ProfilePage: Verification - Current user data:', currentUserData);
+      console.log('🔍 ProfilePage: Verification - Get user error:', getUserError);
+      
+      if (currentUserData.user) {
+        console.log('✅ ProfilePage: Verification - User metadata after save:', currentUserData.user.user_metadata);
+      }
+      
+      // Refresh the user profile from database
+      console.log('🔄 ProfilePage: Refreshing user profile after save...');
+      await refreshUserProfile();
+      
+      setIsEditing(false);
+    } catch (err) {
+      console.log('💥 ProfilePage: Unexpected error during save:', err);
+      alert('Unexpected error: ' + err);
+    }
+    
+    setIsSaving(false);
   };
 
-  const TabButton: React.FC<{
-    id: 'profile' | 'preferences' | 'privacy' | 'data';
-    icon: React.ReactNode;
-    label: string;
-  }> = ({ id, icon, label }) => (
-    <button
-      onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-        activeTab === id
-          ? 'bg-blue-500 text-white'
-          : 'text-slate-600 hover:bg-slate-100'
-      }`}
-    >
-      {icon}
-      <span className="text-sm font-medium">{label}</span>
-    </button>
-  );
+  const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('🖼️ ProfilePage: Avatar upload started...');
+    
+    if (!event.target.files || event.target.files.length === 0) {
+      console.log('❌ ProfilePage: No file selected');
+      throw new Error('You must select an image to upload.');
+    }
+
+    const file = event.target.files[0];
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user!.id}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    console.log('📁 ProfilePage: File details:', {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      userId: user!.id,
+      filePath: filePath
+    });
+
+    setUploading(true);
+    
+    try {
+      console.log('☁️ ProfilePage: Uploading to Supabase storage...');
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true });
+
+      console.log('📋 ProfilePage: Upload response data:', uploadData);
+      console.log('❗ ProfilePage: Upload error:', uploadError);
+
+      if (uploadError) {
+        console.log('❌ ProfilePage: Error uploading avatar:', uploadError.message);
+        alert('Error uploading avatar: ' + uploadError.message);
+        setUploading(false);
+        return;
+      }
+
+      console.log('✅ ProfilePage: File uploaded successfully');
+
+      // Get public URL
+      console.log('🔗 ProfilePage: Getting public URL...');
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      console.log('🌐 ProfilePage: Public URL:', publicUrl);
+
+      // Update user's avatar_url
+      console.log('🚀 ProfilePage: Updating user avatar_url in auth...');
+      const { data: updateData, error: updateError } = await supabase.auth.updateUser({
+        data: { avatar_url: publicUrl }
+      });
+
+      console.log('📋 ProfilePage: Avatar URL update response data:', updateData);
+      console.log('❗ ProfilePage: Avatar URL update error:', updateError);
+
+      if (updateError) {
+        console.log('❌ ProfilePage: Error updating avatar URL in auth:', updateError.message);
+        alert('Error updating avatar URL: ' + updateError.message);
+        return;
+      }
+
+      console.log('✅ ProfilePage: Avatar URL updated in auth successfully');
+      console.log('👤 ProfilePage: Updated user data:', updateData.user);
+      console.log('🏷️ ProfilePage: Updated user metadata:', updateData.user?.user_metadata);
+
+      // Now save avatar to database
+      console.log('💾 ProfilePage: Saving avatar URL to users database table...');
+      console.log('🔗 ProfilePage: Avatar URL being saved:', publicUrl);
+      console.log('👤 ProfilePage: User ID for avatar save:', user!.id);
+      const { data: dbData, error: dbError } = await supabase
+        .from('users')
+        .upsert({
+          id: user!.id,
+          avatar_url: publicUrl,
+          email: user!.email,
+          updated_at: new Date().toISOString()
+        })
+        .select();
+
+      console.log('📋 ProfilePage: Database avatar upsert response data:', dbData);
+      console.log('❗ ProfilePage: Database avatar upsert error:', dbError);
+
+      if (dbError) {
+        console.log('❌ ProfilePage: Error saving avatar to database:', dbError.message);
+        alert('Avatar saved to auth but failed to save to database: ' + dbError.message);
+      } else {
+        console.log('✅ ProfilePage: Successfully saved avatar to database');
+        console.log('💾 ProfilePage: Database avatar record:', dbData);
+      }
+      
+      // Verify the save by checking the current user
+      const { data: currentUserData, error: getUserError } = await supabase.auth.getUser();
+      console.log('🔍 ProfilePage: Verification - Current user data after avatar update:', currentUserData);
+      console.log('🔍 ProfilePage: Verification - Get user error:', getUserError);
+      
+      if (currentUserData.user) {
+        console.log('✅ ProfilePage: Verification - User metadata after avatar update:', currentUserData.user.user_metadata);
+      }
+      
+      // Refresh the user profile from database
+      console.log('🔄 ProfilePage: Refreshing user profile after avatar update...');
+      await refreshUserProfile();
+      
+      setAvatarUrl(publicUrl);
+    } catch (err) {
+      console.log('💥 ProfilePage: Unexpected error during avatar upload:', err);
+      alert('Unexpected error during avatar upload: ' + err);
+    }
+    
+    setUploading(false);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="text-center py-16 text-slate-500">
+        <UserX className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+        <p className="text-xl font-semibold">Please log in</p>
+        <p>Sign in to manage your profile.</p>
+      </div>
+    );
+  }
 
   return (
-    <Layout 
-      title="User Profile" 
-      description="Manage your account settings and preferences"
-    >
-      <div className="max-w-4xl mx-auto">
+      <div>
         {/* Profile Header */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
           <div className="bg-gradient-to-r from-blue-500 to-green-500 h-32"></div>
@@ -100,17 +309,18 @@ export const ProfilePage: React.FC = () => {
             <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-16">
               <div className="relative">
                 <img
-                  src={userData.avatar}
-                  alt={userData.name}
+                  src={getUserAvatarUrl()}
+                  alt={getUserDisplayName()}
                   className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg"
                 />
                 {isEditing && (
                   <label className="absolute bottom-2 right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-600 transition-colors">
-                    <Camera className="h-5 w-5 text-white" />
+                    {uploading ? <Loader2 className="h-5 w-5 text-white animate-spin" /> : <Camera className="h-5 w-5 text-white" />}
                     <input
                       type="file"
                       accept="image/*"
                       onChange={handleAvatarChange}
+                      disabled={uploading}
                       className="hidden"
                     />
                   </label>
@@ -118,10 +328,10 @@ export const ProfilePage: React.FC = () => {
               </div>
               
               <div className="flex-1 sm:ml-4 mt-4 sm:mt-0">
-                <h2 className="text-2xl font-bold text-slate-800">{userData.name}</h2>
-                <p className="text-slate-600">{userData.email}</p>
+                <h2 className="text-2xl font-bold text-slate-800">{getUserDisplayName()}</h2>
+                <p className="text-slate-600">{user.email}</p>
                 <p className="text-sm text-slate-500 mt-1">
-                  Member since {new Date(userData.joinedDate).toLocaleDateString('en-US', { 
+                  Member since {new Date(user.created_at).toLocaleDateString('en-US', { 
                     year: 'numeric', 
                     month: 'long' 
                   })}
@@ -147,7 +357,7 @@ export const ProfilePage: React.FC = () => {
                     </button>
                     <button
                       onClick={handleSave}
-                      disabled={isSaving}
+                      disabled={isSaving || uploading}
                       className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors"
                     >
                       <Save className="h-4 w-4" />
@@ -160,249 +370,42 @@ export const ProfilePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="bg-white rounded-lg shadow-md mb-6">
-          <div className="px-6 py-4 border-b border-slate-200">
-            <nav className="flex flex-wrap gap-2">
-              <TabButton
-                id="profile"
-                icon={<User className="h-4 w-4" />}
-                label="Profile Info"
-              />
-              <TabButton
-                id="preferences"
-                icon={<Bell className="h-4 w-4" />}
-                label="Preferences"
-              />
-              <TabButton
-                id="privacy"
-                icon={<Shield className="h-4 w-4" />}
-                label="Privacy"
-              />
-              <TabButton
-                id="data"
-                icon={<Download className="h-4 w-4" />}
-                label="Data & Export"
-              />
-            </nav>
-          </div>
-
-          <div className="p-6">
-            {/* Profile Info Tab */}
-            {activeTab === 'profile' && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      value={userData.name}
-                      onChange={(e) => setUserData(prev => ({ ...prev, name: e.target.value }))}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="email"
-                        value={userData.email}
-                        disabled
-                        className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg bg-slate-50 text-slate-500"
-                      />
-                      <Mail className="absolute right-3 top-2.5 h-5 w-5 text-slate-400" />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">Email cannot be changed</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Phone Number
-                    </label>
-                    <input
-                      type="tel"
-                      value={userData.phone}
-                      onChange={(e) => setUserData(prev => ({ ...prev, phone: e.target.value }))}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Location
-                    </label>
-                    <input
-                      type="text"
-                      value={userData.location}
-                      onChange={(e) => setUserData(prev => ({ ...prev, location: e.target.value }))}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Timezone
-                    </label>
-                    <select
-                      value={userData.timezone}
-                      onChange={(e) => setUserData(prev => ({ ...prev, timezone: e.target.value }))}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
-                    >
-                      <option value="Pacific Time (PT)">Pacific Time (PT)</option>
-                      <option value="Mountain Time (MT)">Mountain Time (MT)</option>
-                      <option value="Central Time (CT)">Central Time (CT)</option>
-                      <option value="Eastern Time (ET)">Eastern Time (ET)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Currency
-                    </label>
-                    <select
-                      value={userData.currency}
-                      onChange={(e) => setUserData(prev => ({ ...prev, currency: e.target.value }))}
-                      disabled={!isEditing}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
-                    >
-                      <option value="USD">USD - US Dollar</option>
-                      <option value="EUR">EUR - Euro</option>
-                      <option value="GBP">GBP - British Pound</option>
-                      <option value="CAD">CAD - Canadian Dollar</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Preferences Tab */}
-            {activeTab === 'preferences' && (
-              <div className="space-y-6">
+        {/* Profile Form */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">Profile Information</h3>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Notification Preferences</h3>
-                  <div className="space-y-4">
-                    {Object.entries({
-                      email: 'Email Notifications',
-                      push: 'Push Notifications',
-                      sms: 'SMS Notifications',
-                      goalReminders: 'Goal Reminders',
-                      monthlyReports: 'Monthly Reports'
-                    }).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between">
-                        <span className="text-slate-700">{label}</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={userData.notifications[key as keyof typeof userData.notifications]}
-                            onChange={(e) => setUserData(prev => ({
-                              ...prev,
-                              notifications: {
-                                ...prev.notifications,
-                                [key]: e.target.checked
-                              }
-                            }))}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                        </label>
-                      </div>
-                    ))}
-                  </div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    disabled={!isEditing}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-500"
+                  />
                 </div>
-              </div>
-            )}
 
-            {/* Privacy Tab */}
-            {activeTab === 'privacy' && (
-              <div className="space-y-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Privacy Settings</h3>
-                  <div className="space-y-4">
-                    {Object.entries({
-                      profileVisible: 'Make profile visible to other users',
-                      dataSharing: 'Share anonymized data for research',
-                      analytics: 'Allow analytics and performance tracking'
-                    }).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between">
-                        <span className="text-slate-700">{label}</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={userData.privacy[key as keyof typeof userData.privacy]}
-                            onChange={(e) => setUserData(prev => ({
-                              ...prev,
-                              privacy: {
-                                ...prev.privacy,
-                                [key]: e.target.checked
-                              }
-                            }))}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                        </label>
-                      </div>
-                    ))}
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={user.email!}
+                      disabled
+                      className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg bg-slate-50 text-slate-500"
+                    />
+                    <Mail className="absolute right-3 top-2.5 h-5 w-5 text-slate-400" />
                   </div>
+                  <p className="text-xs text-slate-500 mt-1">Email cannot be changed via profile</p>
                 </div>
               </div>
-            )}
-
-            {/* Data & Export Tab */}
-            {activeTab === 'data' && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Data Management</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="flex items-center gap-3 mb-3">
-                        <Download className="h-6 w-6 text-blue-600" />
-                        <h4 className="font-semibold text-blue-900">Export Data</h4>
-                      </div>
-                      <p className="text-sm text-blue-800 mb-4">
-                        Download all your financial data in CSV format
-                      </p>
-                      <button className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                        Download Data
-                      </button>
-                    </div>
-
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <div className="flex items-center gap-3 mb-3">
-                        <Trash2 className="h-6 w-6 text-red-600" />
-                        <h4 className="font-semibold text-red-900">Delete Account</h4>
-                      </div>
-                      <p className="text-sm text-red-800 mb-4">
-                        Permanently delete your account and all data
-                      </p>
-                      <button className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
-                        Delete Account
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-amber-900 mb-2">Data Retention Policy</h4>
-                  <p className="text-sm text-amber-800">
-                    Your financial data is stored securely and retained for as long as your account is active. 
-                    You can request data deletion at any time. Anonymized analytics data may be retained 
-                    for up to 2 years for service improvement purposes.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
         </div>
       </div>
-    </Layout>
   );
 };

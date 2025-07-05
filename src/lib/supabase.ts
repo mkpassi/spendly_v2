@@ -15,16 +15,25 @@ export type Database = {
       users: {
         Row: {
           id: string;
+          full_name: string | null;
+          avatar_url: string | null;
+          email: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
+          full_name?: string | null;
+          avatar_url?: string | null;
+          email?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
+          full_name?: string | null;
+          avatar_url?: string | null;
+          email?: string | null;
           created_at?: string;
           updated_at?: string;
         };

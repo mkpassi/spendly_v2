@@ -15,23 +15,39 @@ interface TransactionData {
   type: 'income' | 'expense';
 }
 
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    const { text, userId = 'anonymous_user' } = await req.json();
+    const { text } = await req.json();
     
     if (!text) {
-      throw new Error("No text provided for parsing");
+      throw new Error("No text provided");
     }
+
+    // Initialize Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+    );
+    
+    // Get the user from the session
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+    const userId = user.id;
 
     // Create OpenAI API call
     const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -78,12 +94,6 @@ serve(async (req: Request) => {
     } catch (e) {
       throw new Error("Invalid JSON response from AI");
     }
-
-    // Initialize Supabase client
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
 
     // Store transactions in database
     const { data, error } = await supabase

@@ -13,7 +13,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { message, userId = 'anonymous_user' } = await req.json();
+    const { message } = await req.json();
     
     if (!message) {
       throw new Error("No message provided");
@@ -22,8 +22,16 @@ serve(async (req: Request) => {
     // Initialize Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
+
+    // Get the user from the session
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+    const userId = user.id;
 
     // Get recent transactions for context
     const { data: transactions } = await supabase

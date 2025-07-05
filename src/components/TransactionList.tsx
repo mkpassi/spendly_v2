@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { DollarSign, Edit, Trash2, Filter } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { DollarSign, Edit, Trash2, Filter, UserX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Transaction {
   id: string;
@@ -13,29 +14,37 @@ interface Transaction {
 }
 
 interface TransactionListProps {
-  userId?: string;
   refreshTrigger?: number;
 }
 
-export const TransactionList: React.FC<TransactionListProps> = ({ 
-  userId = 'anonymous_user',
+const TransactionListComponent: React.FC<TransactionListProps> = ({ 
   refreshTrigger = 0
 }) => {
+  const { user, loading: authLoading } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [hasConnectionError, setHasConnectionError] = useState(false);
+  const loadingRef = useRef(false);
 
-  useEffect(() => {
-    loadTransactions();
-  }, [userId, refreshTrigger]);
+  // Memoize user ID to prevent unnecessary re-renders
+  const userId = useMemo(() => user?.id, [user?.id]);
 
-  useEffect(() => {
-    filterTransactions();
-  }, [transactions, filter]);
+  const loadTransactions = useCallback(async () => {
+    if (!userId) {
+      return;
+    }
 
-  const loadTransactions = async () => {
+    if (loadingRef.current) {
+      return;
+    }
+    
+    loadingRef.current = true;
+    setIsLoading(true);
+    setHasConnectionError(false);
+    
     try {
       const { data, error } = await supabase
         .from('transactions')
@@ -44,28 +53,45 @@ export const TransactionList: React.FC<TransactionListProps> = ({
         .order('date', { ascending: false });
 
       if (error) throw error;
-
+      
       setTransactions(data || []);
+      setHasConnectionError(false);
     } catch (error) {
       console.error('Error loading transactions:', error);
+      setHasConnectionError(true);
     } finally {
       setIsLoading(false);
+      loadingRef.current = false;
     }
-  };
+  }, [userId]);
 
-  const filterTransactions = () => {
+  useEffect(() => {
+    if (userId && !loadingRef.current) {
+      loadTransactions();
+    } else if (!authLoading) {
+      setIsLoading(false);
+      setTransactions([]);
+      setHasConnectionError(false);
+    }
+  }, [userId, authLoading, refreshTrigger, loadTransactions]);
+
+  const filterTransactions = useCallback(() => {
     if (filter === 'all') {
       setFilteredTransactions(transactions);
     } else {
       setFilteredTransactions(transactions.filter(t => t.type === filter));
     }
-  };
+  }, [filter, transactions]);
 
-  const handleEdit = (transaction: Transaction) => {
+  useEffect(() => {
+    filterTransactions();
+  }, [filterTransactions]);
+
+  const handleEdit = useCallback((transaction: Transaction) => {
     setEditingTransaction(transaction);
-  };
+  }, []);
 
-  const handleSaveEdit = async (updatedTransaction: Transaction) => {
+  const handleSaveEdit = useCallback(async (updatedTransaction: Transaction) => {
     try {
       const { error } = await supabase
         .from('transactions')
@@ -80,17 +106,18 @@ export const TransactionList: React.FC<TransactionListProps> = ({
         .eq('id', updatedTransaction.id);
 
       if (error) throw error;
-
+      
       setTransactions(prev => prev.map(t => 
         t.id === updatedTransaction.id ? updatedTransaction : t
       ));
       setEditingTransaction(null);
     } catch (error) {
       console.error('Error updating transaction:', error);
+      alert('Failed to update transaction. Please try again.');
     }
-  };
+  }, []);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('Are you sure you want to delete this transaction?')) return;
 
     try {
@@ -100,25 +127,26 @@ export const TransactionList: React.FC<TransactionListProps> = ({
         .eq('id', id);
 
       if (error) throw error;
-
+      
       setTransactions(prev => prev.filter(t => t.id !== id));
     } catch (error) {
       console.error('Error deleting transaction:', error);
+      alert('Failed to delete transaction. Please try again.');
     }
-  };
+  }, []);
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = useCallback((amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
     }).format(amount);
-  };
+  }, []);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     return new Date(dateString).toLocaleDateString();
-  };
+  }, []);
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="animate-pulse">
@@ -159,11 +187,31 @@ export const TransactionList: React.FC<TransactionListProps> = ({
 
       {/* Transactions */}
       <div className="max-h-96 overflow-y-auto">
-        {filteredTransactions.length === 0 ? (
+        {!user ? (
+          <div className="p-8 text-center text-slate-500">
+            <UserX className="h-12 w-12 mx-auto mb-4 text-slate-300" />
+            <p className="font-semibold">Please log in</p>
+            <p className="text-sm">Sign in to view your transactions.</p>
+          </div>
+        ) : hasConnectionError ? (
+          <div className="p-8 text-center text-red-500">
+            <div className="h-12 w-12 mx-auto mb-4 text-red-300 border-2 border-red-300 rounded-full flex items-center justify-center">
+              <span className="text-lg">⚠️</span>
+            </div>
+            <p className="font-semibold">Connection Error</p>
+            <p className="text-sm text-slate-600">Unable to load transactions. Please check your connection.</p>
+            <button 
+              onClick={() => loadTransactions()} 
+              className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : filteredTransactions.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
             <DollarSign className="h-12 w-12 mx-auto mb-4 text-slate-300" />
             <p>No transactions yet.</p>
-            <p className="text-sm">Start by telling me about a transaction!</p>
+            <p className="text-sm">Add a transaction via the chat to get started!</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-200">
@@ -183,7 +231,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                           <p className="font-medium text-slate-800">{transaction.description}</p>
                           <div className="flex items-center gap-4 text-sm text-slate-600">
                             <span>{formatDate(transaction.date)}</span>
-                            <span className="px-2 py-1 bg-slate-100 rounded-full text-xs">
+                            <span className="px-2 py-1 bg-slate-100 rounded-full text-xs font-medium">
                               {transaction.category}
                             </span>
                           </div>
@@ -311,3 +359,10 @@ const EditTransactionForm: React.FC<EditTransactionFormProps> = ({
     </form>
   );
 };
+
+export const TransactionList = React.memo(TransactionListComponent, (prevProps, nextProps) => {
+  // Only re-render if refreshTrigger actually changes
+  const shouldNotRerender = prevProps.refreshTrigger === nextProps.refreshTrigger;
+  
+  return shouldNotRerender;
+});

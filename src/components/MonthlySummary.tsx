@@ -115,7 +115,7 @@ export const MonthlySummary: React.FC<MonthlySummaryProps> = ({
         }, {} as Record<string, number>);
 
       const topCategory = Object.entries(expensesByCategory)
-        .sort(([,a], [,b]) => b - a)[0]?.[0] || 'None';
+        .sort(([,a]: [string, number], [,b]: [string, number]) => b - a)[0]?.[0] || 'None';
 
       const data: SummaryData = {
         totalIncome,

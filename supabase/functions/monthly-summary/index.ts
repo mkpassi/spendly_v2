@@ -13,7 +13,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { userId = 'anonymous_user', month, year } = await req.json();
+    const { month, year } = await req.json();
     
     // Default to current month if not specified
     const currentDate = new Date();
@@ -23,8 +23,16 @@ serve(async (req: Request) => {
     // Initialize Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
+
+    // Get the user from the session
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+    const userId = user.id;
 
     // Get transactions for the specified month
     const startDate = `${targetYear}-${targetMonth.toString().padStart(2, '0')}-01`;

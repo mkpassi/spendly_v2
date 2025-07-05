@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, MessageCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ChatMessage {
   id: string;
@@ -10,23 +11,28 @@ interface ChatMessage {
 }
 
 interface ChatInterfaceProps {
-  userId?: string;
   onTransactionAdded?: () => void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  userId = 'anonymous_user', 
   onTransactionAdded 
 }) => {
+  const { user, loading: authLoading } = useAuth();
+  const userId = user?.id;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const hasStartedChat = messages.some(m => m.sender === 'user');
+
   // Load chat history on mount
   useEffect(() => {
-    loadChatHistory();
+    if (userId) {
+      loadChatHistory();
+    }
   }, [userId]);
 
   // Auto-scroll to bottom when new messages arrive
@@ -34,7 +40,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages]);
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   const loadChatHistory = async () => {
+    if (!userId) return;
     try {
       const { data, error } = await supabase
         .from('chat_messages')
@@ -58,23 +69,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
     } catch (error) {
       console.error('Error loading chat history:', error);
-      setMessages([{
+      const errorMessage = {
         id: 'error',
-        message: "Welcome to Spendly! I'm here to help you track your finances. Tell me about a recent transaction!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!",
-        sender: 'ai',
+        message: "Welcome to Spendly! Please log in to see your chat history and start a conversation.",
+        sender: 'ai' as const,
         created_at: new Date().toISOString()
-      }]);
+      };
+      setMessages([errorMessage]);
     } finally {
       setIsInitialLoad(false);
     }
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+    if (!inputMessage.trim() || isLoading || !userId) return;
 
     const userMessage = inputMessage.trim();
     setInputMessage('');
@@ -96,15 +104,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (isTransaction) {
         // Try to parse as transaction first
         try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("User not authenticated");
+
           const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-transactions`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Authorization': `Bearer ${session.access_token}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               text: userMessage,
-              userId
+              // userId is implicitly handled by Supabase function with user's JWT
             })
           });
 
@@ -147,16 +158,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const handleChatResponse = async (message: string) => {
+    if (!userId) return;
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("User not authenticated");
+
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat-response`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           message,
-          userId
+          // userId is implicitly handled by Supabase function with user's JWT
         })
       });
 
@@ -222,84 +237,99 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 p-4">
-        <div className="flex items-center gap-3">
-          <MessageCircle className="h-6 w-6 text-blue-500" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-800">Spendly Coach</h1>
-            <p className="text-sm text-slate-600">Your AI Financial Wellness Assistant</p>
-          </div>
+    <div className="flex flex-col h-full">
+      {/* Messages Container */}
+      <div className="flex-1 flex flex-col">
+        <div className="flex-1 max-w-3xl mx-auto w-full">
+          {authLoading || isInitialLoad ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
+          ) : !user ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-slate-500">
+                <MessageCircle size={48} className="mx-auto mb-4" />
+                <p className="text-lg font-semibold">Please log in</p>
+                <p>Sign in to chat with your Spendly Coach.</p>
+              </div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex items-end h-full p-6">
+              <div className="w-full">
+                <div className="flex justify-start">
+                  <div className="max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-white text-slate-800 border border-slate-200">
+                    {formatMessage("Hi! I'm your Financial Wellness Coach from Spendly. Track Smart, Save Easy. 💰\n\nTell me about a recent transaction (like 'Bought groceries for $75') or upload a bank statement to get started!\n\n💡 Tip: Try the 'Data' tab to add sample transactions for testing!")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : messages.length === 1 && messages[0].id === 'welcome' ? (
+            <div className="flex items-end h-full p-6">
+              <div className="w-full">
+                <div className="flex justify-start">
+                  <div className="max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-white text-slate-800 border border-slate-200">
+                    {formatMessage(messages[0].message)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full p-6 overflow-y-auto">
+              <div className="space-y-4">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${
+                      msg.sender === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-md lg:max-w-lg px-4 py-2 rounded-lg ${
+                        msg.sender === 'user'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-white text-slate-800 border border-slate-200'
+                      }`}
+                    >
+                      {formatMessage(msg.message)}
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {isInitialLoad ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                  msg.sender === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white text-slate-800 border border-slate-200'
-                }`}
-              >
-                <p className="text-sm">{formatMessage(msg.message)}</p>
-                <p className={`text-xs mt-1 ${
-                  msg.sender === 'user' ? 'text-blue-100' : 'text-slate-500'
-                }`}>
-                  {new Date(msg.created_at).toLocaleTimeString([], { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
-                </p>
-              </div>
-            </div>
-          ))
-        )}
-        
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-white text-slate-800 border border-slate-200 rounded-lg px-4 py-2 max-w-xs">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm">Thinking...</span>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        <div ref={messagesEndRef} />
-      </div>
-
       {/* Input */}
-      <div className="bg-white border-t border-slate-200 p-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type a message... (e.g., 'Bought coffee for $5')"
-            className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            disabled={isLoading}
-          />
-          <button
-            onClick={handleSendMessage}
-            disabled={isLoading || !inputMessage.trim()}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Send className="h-5 w-5" />
-          </button>
+      <div className="bg-white border-t border-slate-200">
+        <div className="max-w-3xl mx-auto p-4">
+          <div className="relative">
+            <textarea
+              disabled={!user || authLoading}
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder={
+                user
+                  ? 'Ask about your finances or add a transaction...'
+                  : 'Please log in to chat'
+              }
+              className="w-full h-12 p-3 pr-20 rounded-lg bg-slate-100 border-2 border-transparent focus:border-blue-500 focus:bg-white focus:outline-none transition resize-none overflow-hidden"
+              rows={1}
+            />
+            <button
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim() || isLoading || !user}
+              className="absolute right-3 top-1/2 -translate-y-1/2 bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {isLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
